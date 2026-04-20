@@ -296,7 +296,7 @@ export const counterpartiesApi = {
   // Получить подразделения
   getBranches: async (id: string): Promise<Counterparty[]> => {
     const response = await api.get<PaginatedResponse<Counterparty>>('/api/v1/counterparties', {
-      params: { parent_id: id, page: 1, size: 100 },
+      params: { parent_id: id, page: 1, size: 10 },
     });
     return response.data.items.filter(c => c.parent_id === id);
   },
@@ -421,7 +421,7 @@ export const projectsApi = {
 getMyProjects: async (
   role: 'all' | 'owner' | 'member' = 'all',
   page: number = 1,
-  size: number = 20
+  size: number = 10
 ): Promise<PaginatedResponse<Project>> => {
   const response = await api.get<PaginatedResponse<Project>>('/api/v1/projects/my', {
     params: { role, page, size },
@@ -492,17 +492,67 @@ export const ticketsApi = {
     return response.data;
   },
 
-  // Добавить комментарий
-  addComment: async (ticketId: string, text: string, type: 'public' | 'internal' = 'public'): Promise<Ticket> => {
-    const response = await api.post<Ticket>(`/api/v1/tickets/${ticketId}/comments`, { text, type });
+  // Получить комментарий
+  getComments: async (
+    ticketId: string,
+    params?: {
+      include_internal?: boolean;
+      page?: number;
+      size?: number;
+    }
+  ): Promise<PaginatedResponse<Comment>> => {
+    const response = await api.get<PaginatedResponse<Comment>>(
+      `/api/v1/tickets/${ticketId}/comments`,
+      { 
+        params: {
+          include_internal: params?.include_internal || false,
+          page: params?.page || 1,
+          size: params?.size || 50
+        }
+      }
+    );
     return response.data;
+  },
+
+  // Добавить комментарий - исправлен (возвращает комментарий, а не тикет)
+  addComment: async (
+    ticketId: string, 
+    text: string, 
+    type: 'public' | 'internal' | 'note' = 'public'
+  ): Promise<Comment> => {
+    const response = await api.post<Comment>(`/api/v1/tickets/${ticketId}/comments`, { 
+      text, 
+      type 
+    });
+    return response.data;
+  },
+
+  // Редактировать комментарий (НОВЫЙ МЕТОД)
+  updateComment: async (
+    ticketId: string,
+    commentId: string,
+    text: string
+  ): Promise<Comment> => {
+    const response = await api.patch<Comment>(
+      `/api/v1/tickets/${ticketId}/comments/${commentId}`,
+      { text }
+    );
+    return response.data;
+  },
+
+  // Удалить комментарий (НОВЫЙ МЕТОД)
+  deleteComment: async (
+    ticketId: string,
+    commentId: string
+  ): Promise<void> => {
+    await api.delete(`/api/v1/tickets/tickets/${ticketId}/comments/${commentId}`);
   },
   
 // В ticketsApi добавьте/обновите метод:
 
 getAllWithFilters: async (
   page: number = 1,
-  size: number = 20,
+  size: number = 10,
   filters?: {
     status?: TicketStatus;
     priority?: TicketPriority;
@@ -591,6 +641,12 @@ export const usersApi = {
       `/api/v1/counterparties/${counterpartyId}/customers`,
       { params: { page, size } }
     );
+    return response.data;
+  },
+   getSupports: async (page: number = 1, size: number = 100): Promise<PaginatedResponse<SimpleUser>> => {
+    const response = await api.get<PaginatedResponse<SimpleUser>>('/api/v1/users/supports', {
+      params: { page, size }
+    });
     return response.data;
   },
 };

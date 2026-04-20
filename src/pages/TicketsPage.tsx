@@ -146,7 +146,7 @@ export default function TicketsPage() {
       
       // Для customer — используем getAllWithFilters с автоматической подстановкой counterparty_id
       if (isCustomer && user?.counterparty_id) {
-        response = await ticketsApi.getAllWithFilters(page, 20, {
+        response = await ticketsApi.getAllWithFilters(page, 10, {
           status: statusFilter || undefined,
           priority: priorityFilter || undefined,
           counterparty_id: user.counterparty_id,  // автоматически подставляем ID компании пользователя
@@ -157,7 +157,7 @@ export default function TicketsPage() {
       } 
       // Для customer_admin — заявки компании с фильтрацией по сотрудникам
       else if (isCustomerAdmin && user?.counterparty_id) {
-        response = await ticketsApi.getAllWithFilters(page, 20, {
+        response = await ticketsApi.getAllWithFilters(page, 10, {
           status: statusFilter || undefined,
           priority: priorityFilter || undefined,
           counterparty_id: user.counterparty_id,
@@ -168,7 +168,7 @@ export default function TicketsPage() {
       }
       // Для support и admin — все заявки с полными фильтрами
       else if (isSupport || isAdmin) {
-        response = await ticketsApi.getAllWithFilters(page, 20, {
+        response = await ticketsApi.getAllWithFilters(page, 10, {
           status: statusFilter || undefined,
           priority: priorityFilter || undefined,
           counterparty_id: counterpartyFilter || undefined,
@@ -179,7 +179,7 @@ export default function TicketsPage() {
       }
       else {
         // Fallback
-        response = await ticketsApi.getAll(page, 20);
+        response = await ticketsApi.getAll(page, 10);
       }
       
       setTickets(response.items);

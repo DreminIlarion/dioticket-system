@@ -1,33 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   ArrowLeft, Send, Clock, User, MessageSquare, FileText, History,
   Loader2, Paperclip, Download, Image, File, ChevronDown, ChevronUp,
   Hash, Calendar, UserPlus, UserCheck, UserX, CheckCircle2, X,
-  Users, Search, Settings, AlertCircle, RefreshCw, Tag,
+  Users, Search, Settings, AlertCircle, RefreshCw, Tag, ThumbsUp, Reply,
   Paperclip as PaperclipIcon, MessageCircle
 } from 'lucide-react';
 import { ticketsApi, usersApi } from '../api/client';
 import { attachmentsApi } from '../api/attachments';
 import { useAuthStore } from '../stores/authStore';
 import { useToast } from '../components/ui/use-toast';
-import type { Ticket, CounterpartyCustomer } from '../types';
+import type { Ticket, CounterpartyCustomer, Comment, SimpleUser } from '../types';
 
 // Матрица переходов статусов
 const STATUS_TRANSITIONS: Record<string, string[]> = {
-  'Новый': ['Открыт'],
+  'Новый': ['На согласовании', 'Открыт'],
+  'На согласовании': ['Открыт', 'Отклонён'],
   'Открыт': ['В работе', 'Ожидает ответа'],
   'В работе': ['Ожидает ответа', 'Решён'],
   'Ожидает ответа': ['В работе'],
-  'Решён': ['Закрыт', 'Переоткрыт'],
+  'Решён': ['Закрыт'],
   'Закрыт': ['Переоткрыт'],
   'Переоткрыт': ['Открыт', 'В работе'],
+  'Отклонён': ['Закрыт'],
 };
 
 // Кто может изменять статусы
 const STATUS_PERMISSIONS: Record<string, string[]> = {
   'Новый': ['support_agent', 'support_manager', 'admin'],
-  'Открыт': ['support_agent', 'support_manager', 'admin'],
+  'На согласовании': ['support_agent', 'support_manager', 'admin'], 
+  'Открыт': ['support_agent', 'support_manager', 'executor', 'admin'],
   'В работе': ['support_agent', 'support_manager', 'executor', 'admin'],
   'Ожидает ответа': ['support_agent', 'support_manager', 'executor', 'admin'],
   'Решён': ['support_agent', 'support_manager', 'executor', 'admin'],
@@ -37,27 +40,31 @@ const STATUS_PERMISSIONS: Record<string, string[]> = {
 
 // Описание статусов
 const STATUS_DESCRIPTIONS: Record<string, string> = {
-  'Новый': 'Заявка только создана, ожидает рассмотрения',
-  'Открыт': 'Заявка принята в работу',
-  'В работе': 'Активная работа над заявкой',
-  'Ожидает ответа': 'Ожидание ответа от клиента или другой стороны',
-  'Решён': 'Работа выполнена, ожидает подтверждения',
-  'Закрыт': 'Заявка закрыта',
-  'Переоткрыт': 'Заявка переоткрыта после закрытия',
+  'Новый': 'Тикет только создан, ожидает обработки',
+  'На согласовании': 'Тикет создан, но ещё не согласован заказчиком',
+  'Открыт': 'Тикет согласован и готов к работе',
+  'В работе': 'Над тикетом активно работают',
+  'Ожидает ответа': 'Ждём ответа от клиента или другой стороны',
+  'Решён': 'Работа выполнена, ждём подтверждения закрытия',
+  'Закрыт': 'Тикет закрыт',
+  'Переоткрыт': 'Тикет переоткрыт (проблема вернулась)',
+  'Отклонён': 'Тикет отклонён (неактуален, дубликат и т.д.)',
 };
 
-// Кэш для маппинга номера → ID (глобальный)
+// Кэш для маппинга номера → ID
 let ticketNumberToIdCache: Map<string, string> | null = null;
 let cacheLoadingPromise: Promise<void> | null = null;
 
 export default function TicketDetailPage() {
-  // Превью изображений в карточках
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
-
-  // Модальное окно превью
   const [previewFile, setPreviewFile] = useState<any>(null);
-
-  
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [commentsPage, setCommentsPage] = useState(1);
+  const [commentsTotalPages, setCommentsTotalPages] = useState(1);
+  const [commentsTotalItems, setCommentsTotalItems] = useState(0);
+  const [hasMoreComments, setHasMoreComments] = useState(true);
+  const [loadingMoreComments, setLoadingMoreComments] = useState(false);
 
   const { ticketNumber } = useParams<{ ticketNumber: string }>();
   const navigate = useNavigate();
@@ -75,31 +82,122 @@ export default function TicketDetailPage() {
   const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingAssignee, setUpdatingAssignee] = useState(false);
-  const [companyUsers, setCompanyUsers] = useState<CounterpartyCustomer[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
   const [searchUser, setSearchUser] = useState('');
 
   const userRole = user?.role || '';
-  const canAssign = ['support_agent', 'support_manager', 'admin'].includes(userRole);
   const canChangeStatus = STATUS_PERMISSIONS[ticket?.status || '']?.includes(userRole) || false;
 
-  // Загружаем кэш при монтировании компонента
-  useEffect(() => {
-    initCache();
-  }, []);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [messageType, setMessageType] = useState<'public' | 'internal'>('public');
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
 
-  // Загружаем тикет по номеру
-  useEffect(() => {
-    if (ticketNumber) {
-      loadTicketByNumber(ticketNumber);
+  const [supportUsers, setSupportUsers] = useState<SimpleUser[]>([]);
+  const [loadingSupports, setLoadingSupports] = useState(false);
+  
+  // Состояния для комментариев
+  const [commentSortOrder, setCommentSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+
+  const canAssign = ['support_agent', 'support_manager', 'admin'].includes(userRole) 
+    && ['Открыт', 'В работе', 'Ожидает ответа', 'Решён'].includes(ticket?.status || '');
+
+  // Загрузка пользователей поддержки
+  const loadSupportUsers = async () => {
+    setLoadingSupports(true);
+    try {
+      const response = await usersApi.getSupports(1, 100);
+      setSupportUsers(response.items);
+    } catch (error) {
+      console.error('Failed to load support users:', error);
+      toast({ 
+        title: 'Ошибка', 
+        description: 'Не удалось загрузить список исполнителей', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setLoadingSupports(false);
     }
-  }, [ticketNumber]);
+  };
 
   useEffect(() => {
-    if (canAssign && ticket?.counterparty_id) loadCompanyUsers();
-  }, [canAssign, ticket?.counterparty_id]);
+    if (canAssign) {
+      loadSupportUsers();
+    }
+  }, [canAssign]);
 
-  // Инициализация кэша (загружаем все тикеты один раз)
+  const getAssigneeName = () => {
+    if (!ticket?.assigned_to) return null;
+    const assignee = supportUsers.find(u => u.id === ticket.assigned_to);
+    return assignee?.full_name || assignee?.username || assignee?.email;
+  };
+
+  const filteredUsers = supportUsers.filter(u => 
+    !searchUser || 
+    u.full_name?.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.username?.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.email?.toLowerCase().includes(searchUser.toLowerCase())
+  );
+
+  const canWriteInternal = userRole === 'admin' || userRole === 'support_agent' || userRole === 'support_manager';
+  
+  // Форматирование относительного времени
+  const formatRelativeTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'только что';
+    if (diffMins < 60) return `${diffMins} мин. назад`;
+    if (diffHours < 24) return `${diffHours} ч. назад`;
+    if (diffDays === 1) return 'вчера';
+    if (diffDays < 7) return `${diffDays} дн. назад`;
+    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  };
+  
+  const formatMessageTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ru-RU', { 
+      day: 'numeric', 
+      month: 'short',
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+  
+  const getAvatarColor = (role: string) => {
+    switch (role) {
+      case 'admin':
+      case 'support_agent':
+      case 'support_manager':
+        return 'from-red-800 to-red-700';
+      case 'customer_admin':
+        return 'text-white/60';
+      case 'executor':
+        return 'from-green-600 to-green-700';
+      default:
+        return 'from-gray-600 to-gray-700';
+    }
+  };
+  
+  const getAuthorName = (comment: Comment) => {
+    switch (comment.author_role) {
+      case 'admin': return 'Поддержка';
+      case 'support_agent': return 'Агент поддержки';
+      case 'support_manager': return 'Менеджер';
+      case 'customer_admin': return 'Администратор контрагента';
+      case 'executor': return 'Исполнитель';
+      default: return 'Клиент';
+    }
+  };
+
+  const isCurrentUser = (comment: Comment) => comment.author_id === user?.user_id;
+
+  // Инициализация кэша
   const initCache = async () => {
     if (ticketNumberToIdCache) return;
     if (cacheLoadingPromise) return cacheLoadingPromise;
@@ -112,13 +210,11 @@ export default function TicketDetailPage() {
       while (hasMore) {
         try {
           const response = await ticketsApi.getAll(page, 100);
-          
           response.items.forEach((item: any) => {
             if (item.number && item.id) {
               ticketNumberToIdCache!.set(item.number, item.id);
             }
           });
-          
           hasMore = response.items.length === 100;
           page++;
         } catch (error) {
@@ -131,17 +227,78 @@ export default function TicketDetailPage() {
     return cacheLoadingPromise;
   };
 
-  // Загрузка тикета по номеру
+  // Загрузка комментариев с пагинацией
+  const loadComments = async (ticketId: string, page: number = 1, append: boolean = false) => {
+    if (append) {
+      setLoadingMoreComments(true);
+    } else {
+      setLoadingComments(true);
+    }
+    
+    try {
+      const response = await ticketsApi.getComments(ticketId, {
+        include_internal: userRole === 'admin' || userRole === 'support_agent' || userRole === 'support_manager',
+        page: page,
+        size: 15
+      });
+      
+      if (append) {
+        setComments(prev => [...prev, ...response.items]);
+      } else {
+        setComments(response.items);
+      }
+      
+      setCommentsTotalPages(response.total_pages);
+      setCommentsTotalItems(response.total_items);
+      setCommentsPage(response.page);
+      setHasMoreComments(response.page < response.total_pages);
+    } catch (error) {
+      console.error('Failed to load comments:', error);
+      toast({ title: 'Ошибка', description: 'Не удалось загрузить комментарии', variant: 'destructive' });
+    } finally {
+      setLoadingComments(false);
+      setLoadingMoreComments(false);
+    }
+  };
+
+  // Загрузка следующих комментариев
+  const loadMoreComments = useCallback(async () => {
+    if (!ticket?.id) return;
+    if (loadingMoreComments || !hasMoreComments) return;
+    
+    const nextPage = commentsPage + 1;
+    await loadComments(ticket.id, nextPage, true);
+  }, [ticket?.id, commentsPage, hasMoreComments, loadingMoreComments]);
+
+  // Обработчик скролла для бесконечной загрузки
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement;
+    const scrollTop = target.scrollTop;
+    const scrollHeight = target.scrollHeight;
+    const clientHeight = target.clientHeight;
+    
+    // При скролле вверх (для старых комментариев)
+    if (commentSortOrder === 'oldest' && scrollTop < 100 && hasMoreComments && !loadingMoreComments) {
+      loadMoreComments();
+    }
+    
+    // При скролле вниз (для новых комментариев)
+    if (commentSortOrder === 'newest' && scrollTop + clientHeight >= scrollHeight - 100 && hasMoreComments && !loadingMoreComments) {
+      loadMoreComments();
+    }
+  }, [commentSortOrder, hasMoreComments, loadingMoreComments, loadMoreComments]);
+
+  // Загрузка тикета
   const loadTicketByNumber = async (number: string) => {
     setLoading(true);
     try {
       await initCache();
-      
       const ticketId = ticketNumberToIdCache?.get(number);
       
       if (ticketId) {
         const data = await ticketsApi.getById(ticketId);
         setTicket(data);
+        await loadComments(ticketId, 1, false);
       } else {
         try {
           const searchResponse = await ticketsApi.getAll(1, 100);
@@ -151,6 +308,7 @@ export default function TicketDetailPage() {
             const data = await ticketsApi.getById(found.id);
             setTicket(data);
             ticketNumberToIdCache?.set(number, found.id);
+            await loadComments(found.id, 1, false);
           } else {
             toast({ title: 'Ошибка', description: 'Заявка не найдена', variant: 'destructive' });
             navigate('/tickets');
@@ -169,32 +327,70 @@ export default function TicketDetailPage() {
     }
   };
 
-  const loadCompanyUsers = async () => {
-    if (!ticket?.counterparty_id) return;
-    setLoadingUsers(true);
+  // Отправка комментария
+  const handleSendMessage = async () => {
+    if (!message.trim() || !ticket?.id || sending) return;
+    setSending(true);
+    
     try {
-      const response = await usersApi.getCustomers(ticket.counterparty_id, 1, 100);
-      setCompanyUsers(response.items);
+      await ticketsApi.addComment(ticket.id, message.trim(), messageType);
+      setMessage('');
+      await loadComments(ticket.id, 1, false);
     } catch (error) {
-      console.error('Failed to load company users:', error);
+      console.error('Failed to send message:', error);
+      toast({ 
+        title: 'Ошибка', 
+        description: 'Не удалось отправить сообщение', 
+        variant: 'destructive' 
+      });
     } finally {
-      setLoadingUsers(false);
+      setSending(false);
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!message.trim() || !ticket?.id) return;
-    setSending(true);
+  // Отправка ответа
+  const handleSendReply = async (parentCommentId: string) => {
+    if (!replyText.trim() || !ticket?.id) return;
+    
     try {
-      await ticketsApi.addComment(ticket.id, message.trim());
-      setMessage('');
-      toast({ title: 'Успешно', description: 'Сообщение отправлено' });
-      loadTicketByNumber(ticketNumber!);
+      await ticketsApi.addComment(ticket.id, replyText.trim(), messageType, parentCommentId);
+      setReplyText('');
+      setReplyingTo(null);
+      await loadComments(ticket.id, 1, false);
+      toast({ title: 'Успешно', description: 'Ответ добавлен' });
     } catch (error) {
-      toast({ title: 'Ошибка', description: 'Не удалось отправить сообщение', variant: 'destructive' });
-    } finally {
-      setSending(false);
+      toast({ title: 'Ошибка', description: 'Не удалось добавить ответ', variant: 'destructive' });
+    }
+  };
+
+  // Лайк (фронтенд)
+  const handleLike = (commentId: string) => {
+    setLikedComments(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(commentId)) {
+        newSet.delete(commentId);
+      } else {
+        newSet.add(commentId);
+      }
+      return newSet;
+    });
+  };
+
+  // Ответ на комментарий
+  const handleReply = (commentId: string) => {
+    setReplyingTo(replyingTo === commentId ? null : commentId);
+    setReplyText('');
+  };
+
+  // Обработчик клавиш
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      if (replyingTo) {
+        handleSendReply(replyingTo);
+      } else {
+        handleSendMessage();
+      }
     }
   };
 
@@ -243,26 +439,21 @@ export default function TicketDetailPage() {
     }
   };
 
+  // Загрузка превью изображений
   useEffect(() => {
     if (!ticket?.attachments) return;
-
     ticket.attachments.forEach(async (file) => {
       if (!file.mime_type.startsWith('image/') || imagePreviews[file.id]) return;
-
       try {
         const { download_url } = await attachmentsApi.getPresignedDownloadUrl(file.id);
-        
         let url = download_url;
         if (url.includes('minio:9000') || url.includes('maildev:9000')) {
           url = url.replace(/http:\/\/(minio|maildev):9000/g, 'http://localhost:9900');
         }
-
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch');
-
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
-
         setImagePreviews(prev => ({ ...prev, [file.id]: objectUrl }));
       } catch (err) {
         console.error(`Failed to load preview for ${file.original_filename}`, err);
@@ -270,14 +461,18 @@ export default function TicketDetailPage() {
     });
   }, [ticket?.attachments]);
 
-  // Новые функции для превью
-  const openPreview = (file: any) => {
-    setPreviewFile(file);
-  };
+  useEffect(() => {
+    initCache();
+  }, []);
 
-  const closePreview = () => {
-    setPreviewFile(null);
-  };
+  useEffect(() => {
+    if (ticketNumber) {
+      loadTicketByNumber(ticketNumber);
+    }
+  }, [ticketNumber]);
+
+  const openPreview = (file: any) => setPreviewFile(file);
+  const closePreview = () => setPreviewFile(null);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
@@ -293,12 +488,14 @@ export default function TicketDetailPage() {
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       'Новый': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      'На согласовании': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
       'Открыт': 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
       'В работе': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-      'Ожидает ответа': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+      'Ожидает ответа': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
       'Решён': 'bg-green-500/20 text-green-400 border-green-500/30',
       'Закрыт': 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30',
-      'Переоткрыт': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+      'Переоткрыт': 'bg-red-500/20 text-red-400 border-red-500/30',
+      'Отклонён': 'bg-gray-500/20 text-gray-400 border-gray-500/30',
     };
     return colors[status] || 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30';
   };
@@ -323,22 +520,7 @@ export default function TicketDetailPage() {
     });
   };
 
-
-
-
-
-  const getAssigneeName = () => {
-    if (!ticket?.assigned_to) return null;
-    const assignee = companyUsers.find(u => u.id === ticket.assigned_to);
-    return assignee?.full_name || assignee?.username || assignee?.email;
-  };
-
   const availableStatuses = STATUS_TRANSITIONS[ticket?.status || ''] || [];
-  const filteredUsers = companyUsers.filter(u => 
-    !searchUser || 
-    u.full_name?.toLowerCase().includes(searchUser.toLowerCase()) ||
-    u.email?.toLowerCase().includes(searchUser.toLowerCase())
-  );
 
   if (loading) {
     return (
@@ -405,13 +587,13 @@ export default function TicketDetailPage() {
 
       {/* Основной контент */}
       <div className="grid lg:grid-cols-3 gap-8">
-        {/* Левая колонка - основной контент */}
+        {/* Левая колонка */}
         <div className="lg:col-span-2 space-y-6">
           {/* Tabs */}
           <div className="flex gap-2 border-b border-white/10">
             {[
               { id: 'details', label: 'Детали', icon: FileText },
-              { id: 'chat', label: 'Обсуждение', icon: MessageCircle, count: ticket.comments?.length },
+              { id: 'chat', label: 'Обсуждение', icon: MessageCircle, count: commentsTotalItems },
               { id: 'history', label: 'История', icon: History, count: ticket.history?.length },
               { id: 'manage', label: 'Управление', icon: Settings }
             ].map((tab) => (
@@ -437,67 +619,251 @@ export default function TicketDetailPage() {
 
           {/* Tab Content */}
           <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 overflow-hidden">
-            {/* Чат */}
+            {/* Комментарии */}
             {activeTab === 'chat' && (
-              <>
-                <div className="h-[500px] overflow-y-auto p-6 space-y-5">
-                  {ticket.comments && ticket.comments.length > 0 ? (
-                    ticket.comments.map((comment) => (
-                      <div key={comment.id} className="flex gap-4">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center flex-shrink-0">
-                          <User className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <span className="text-base font-medium text-white">
-                              {comment.author_role === 'admin' ? 'Поддержка' : 
-                               comment.author_role === 'customer_admin' ? 'Администратор' : 
-                               comment.author_role === 'executor' ? 'Исполнитель' : 'Пользователь'}
-                            </span>
-                            <span className="text-l text-white/40">
-                              {formatDate(comment.created_at)}
-                            </span>
-                            {comment.type === 'internal' && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
-                                Внутренний
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-white/80 text-base leading-relaxed">{comment.text}</p>
-                        </div>
+              <div className="flex flex-col">
+                {/* Заголовок с сортировкой */}
+                <div className="px-6 py-4 border-b border-white/10 bg-white/5">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <MessageCircle className="w-5 h-5 text-white/60" />
+                      <span className="text-white font-medium">
+                        {commentsTotalItems} {commentsTotalItems === 1 ? 'комментарий' : commentsTotalItems < 5 ? 'комментария' : 'комментариев'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="flex gap-1 bg-white/5 rounded-lg p-0.5">
+                        <button
+                          onClick={() => setCommentSortOrder('newest')}
+                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                            commentSortOrder === 'newest' 
+                              ? 'bg-red-800/50 text-white' 
+                              : 'text-white/40 hover:text-white/60'
+                          }`}
+                        >
+                          Сначала новые
+                        </button>
+                        <button
+                          onClick={() => setCommentSortOrder('oldest')}
+                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                            commentSortOrder === 'oldest' 
+                              ? 'bg-red-800/50 text-white' 
+                              : 'text-white/40 hover:text-white/60'
+                          }`}
+                        >
+                          Сначала старые
+                        </button>
                       </div>
-                    ))
+                      
+                      {canWriteInternal && (
+                        <span className="text-xs text-white/40">🔒 Внутренние видны только сотрудникам</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Форма добавления комментария (вверху) */}
+                <div className="p-5 border-b border-white/10 bg-white/3">
+                  <div className="flex gap-3">
+                    <div className="flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-800 to-red-700 flex items-center justify-center">
+                        <User className="w-5 h-5 text-white" />
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1">
+                      <textarea
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Написать комментарий..."
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:outline-none focus:border-red-500/50 focus:bg-white/10 transition-all text-sm resize-none"
+                        rows={2}
+                      />
+                      
+                      <div className="flex justify-end items-center gap-3 mt-2">
+                        {canWriteInternal && (
+                          <button
+                            type="button"
+                            onClick={() => setMessageType(messageType === 'public' ? 'internal' : 'public')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              messageType === 'internal'
+                                ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                                : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
+                            }`}
+                          >
+                            {messageType === 'internal' ? '🔒 Внутренний' : '🌍 Публичный'}
+                          </button>
+                        )}
+                        
+                        <button
+                          onClick={handleSendMessage}
+                          disabled={!message.trim() || sending}
+                          className="px-5 py-1.5 rounded-lg bg-red-800 hover:bg-red-700 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+                        >
+                          {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          Отправить
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Список комментариев с бесконечной прокруткой */}
+                <div 
+                  ref={chatContainerRef}
+                  onScroll={handleScroll}
+                  className="flex-1 overflow-y-auto p-6 space-y-5 max-h-[500px]"
+                >
+                  {loadingComments && comments.length === 0 ? (
+                    <div className="flex justify-center py-10">
+                      <Loader2 className="w-8 h-8 text-white/30 animate-spin" />
+                    </div>
+                  ) : comments.length > 0 ? (
+                    <>
+                      {commentSortOrder === 'newest' && loadingMoreComments && commentsPage > 1 && (
+                        <div className="flex justify-center py-2">
+                          <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
+                        </div>
+                      )}
+                      
+                      {[...comments]
+                        .sort((a, b) => {
+                          if (commentSortOrder === 'newest') {
+                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                          } else {
+                            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                          }
+                        })
+                        .map((comment) => {
+                          const isInternal = comment.type === 'internal';
+                          const isLiked = likedComments.has(comment.id);
+                          const isReplying = replyingTo === comment.id;
+                          
+                          return (
+                            <div key={comment.id} className="group">
+                              <div className="flex gap-3">
+                                <div className="flex-shrink-0">
+                                  <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${getAvatarColor(comment.author_role)} flex items-center justify-center`}>
+                                    <User className="w-5 h-5 text-white" />
+                                  </div>
+                                </div>
+                                
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-medium text-white">
+                                      {getAuthorName(comment)}
+                                    </span>
+                                    <span className="text-xs text-white/40">
+                                      {formatRelativeTime(comment.created_at)}
+                                    </span>
+                                    {comment.edited_at && (
+                                      <span className="text-xs text-white/30">(изменён)</span>
+                                    )}
+                                    {isInternal && (
+                                      <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
+                                        Внутренний
+                                      </span>
+                                    )}
+                                  </div>
+                                  
+                                  <p className="text-white/90 text-sm mt-1.5 whitespace-pre-wrap break-words leading-relaxed">
+                                    {comment.text}
+                                  </p>
+                                  
+                                  <div className="flex items-center gap-5 mt-2">
+                                    <button
+                                      onClick={() => handleLike(comment.id)}
+                                      className={`flex items-center gap-1.5 text-xs transition-colors ${
+                                        isLiked ? 'text-red-400' : 'text-white/40 hover:text-white/60'
+                                      }`}
+                                    >
+                                      <ThumbsUp className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
+                                      <span>{(comment.likes_count || 0) + (isLiked ? 1 : 0)}</span>
+                                    </button>
+                                    
+                                    <button
+                                      onClick={() => handleReply(comment.id)}
+                                      className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white/60 transition-colors"
+                                    >
+                                      <Reply className="w-4 h-4" />
+                                      <span>Ответить</span>
+                                    </button>
+                                  </div>
+                                  
+                                  {isReplying && (
+                                    <div className="mt-3 flex gap-2">
+                                      <textarea
+                                        value={replyText}
+                                        onChange={(e) => setReplyText(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        placeholder={`Ответить ${getAuthorName(comment)}...`}
+                                        className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-red-500/50 text-sm resize-none"
+                                        rows={2}
+                                        autoFocus
+                                      />
+                                      <div className="flex flex-col gap-2">
+                                        <button
+                                          onClick={() => handleSendReply(comment.id)}
+                                          disabled={!replyText.trim()}
+                                          className="px-4 py-1.5 bg-red-800 hover:bg-red-700 rounded-lg text-white text-sm disabled:opacity-50"
+                                        >
+                                          Ответить
+                                        </button>
+                                        <button
+                                          onClick={() => setReplyingTo(null)}
+                                          className="px-4 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-white/60 text-sm"
+                                        >
+                                          Отмена
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {comment.attachments && comment.attachments.length > 0 && (
+                                    <div className="flex gap-2 mt-3 flex-wrap">
+                                      {comment.attachments.map((att) => (
+                                        <button
+                                          key={att.id}
+                                          onClick={() => handleDownload(att.id)}
+                                          className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1"
+                                        >
+                                          <Paperclip className="w-3 h-3" />
+                                          {att.original_filename}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      
+                      {commentSortOrder === 'oldest' && loadingMoreComments && commentsPage > 1 && (
+                        <div className="flex justify-center py-2">
+                          <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
+                        </div>
+                      )}
+                      
+                      {!hasMoreComments && comments.length > 0 && (
+                        <div className="text-center py-4 text-xs text-white/30">
+                          {commentSortOrder === 'newest' ? 'Вы просмотрели все новые комментарии' : 'Вы просмотрели все комментарии'}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="text-center py-16">
-                      <MessageCircle className="w-20 h-20 mx-auto mb-5 text-white/20" />
-                      <p className="text-white/50 text-xl">Нет сообщений</p>
-                      <p className="text-base text-white/30 mt-2">Будьте первым, кто напишет</p>
+                      <MessageCircle className="w-16 h-16 mx-auto mb-4 text-white/20" />
+                      <p className="text-white/50 text-lg">Нет комментариев</p>
+                      <p className="text-sm text-white/30 mt-1">Будьте первым, кто оставит комментарий</p>
                     </div>
                   )}
                 </div>
-
-                <form onSubmit={handleSendMessage} className="p-5 border-t border-white/10 bg-white/5">
-                  <div className="flex gap-3">
-                    <input
-                      type="text"
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      placeholder="Введите сообщение..."
-                      className="flex-1 px-5 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40 focus:outline-none focus:border-red-500/50 transition-colors text-base"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!message.trim() || sending}
-                      className="px-8 py-3 bg-red-800 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-white font-medium transition-colors flex items-center gap-2"
-                    >
-                      {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                      <span>Отправить</span>
-                    </button>
-                  </div>
-                </form>
-              </>
+              </div>
             )}
-
+            
             {/* Детали */}
             {activeTab === 'details' && (
               <div className="p-6 space-y-8">
@@ -536,70 +902,66 @@ export default function TicketDetailPage() {
                   </div>
                 )}
 
-                {/* Вложения — превью прямо в карточке (правильная версия) */}
-<div>
-  <div className="flex items-center justify-between mb-6">
-    <h3 className="text-2xl font-semibold text-white flex items-center gap-3">
-      <PaperclipIcon className="w-6 h-6 text-white/60" />
-      Вложения ({ticket.attachments?.length || 0})
-    </h3>
-  </div>
+                <div>
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-2xl font-semibold text-white flex items-center gap-3">
+                      <PaperclipIcon className="w-6 h-6 text-white/60" />
+                      Вложения ({ticket.attachments?.length || 0})
+                    </h3>
+                  </div>
 
-  {!ticket.attachments || ticket.attachments.length === 0 ? (
-    <div className="text-center py-12 text-white/40 bg-white/5 rounded-2xl">
-      <PaperclipIcon className="w-16 h-16 mx-auto mb-4 opacity-40" />
-      <p className="text-lg">Нет прикреплённых файлов</p>
-    </div>
-  ) : (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {ticket.attachments.map((file) => {
-        const isImage = file.mime_type.startsWith('image/');
-
-        return (
-          <div
-            key={file.id}
-            onClick={() => openPreview(file)}           // ← теперь открывает модалку
-            className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden group hover:border-white/30 transition-all cursor-pointer"
-          >
-            <div className="h-52 bg-zinc-950 flex items-center justify-center relative overflow-hidden">
-              {isImage && imagePreviews[file.id] ? (
-                <img
-                  src={imagePreviews[file.id]}
-                  alt={file.original_filename}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-              ) : isImage ? (
-                <Loader2 className="w-8 h-8 text-white/30 animate-spin" />
-              ) : (
-                <div className="text-6xl text-white/30">
-                  {getFileIcon(file.mime_type)}
+                  {!ticket.attachments || ticket.attachments.length === 0 ? (
+                    <div className="text-center py-12 text-white/40 bg-white/5 rounded-2xl">
+                      <PaperclipIcon className="w-16 h-16 mx-auto mb-4 opacity-40" />
+                      <p className="text-lg">Нет прикреплённых файлов</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {ticket.attachments.map((file) => {
+                        const isImage = file.mime_type.startsWith('image/');
+                        return (
+                          <div
+                            key={file.id}
+                            onClick={() => openPreview(file)}
+                            className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden group hover:border-white/30 transition-all cursor-pointer"
+                          >
+                            <div className="h-52 bg-zinc-950 flex items-center justify-center relative overflow-hidden">
+                              {isImage && imagePreviews[file.id] ? (
+                                <img
+                                  src={imagePreviews[file.id]}
+                                  alt={file.original_filename}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              ) : isImage ? (
+                                <Loader2 className="w-8 h-8 text-white/30 animate-spin" />
+                              ) : (
+                                <div className="text-6xl text-white/30">
+                                  {getFileIcon(file.mime_type)}
+                                </div>
+                              )}
+                              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+                                <p className="text-white text-sm line-clamp-2 font-medium">
+                                  {file.original_filename}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="p-3 flex justify-between items-center">
+                              <div className="text-xs text-white/40">
+                                {formatFileSize(file.size_bytes)}
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}
+                                className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-xl"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              )}
-
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-                <p className="text-white text-sm line-clamp-2 font-medium">
-                  {file.original_filename}
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3 flex justify-between items-center">
-              <div className="text-xs text-white/40">
-                {formatFileSize(file.size_bytes)}
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}
-                className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-xl"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  )}
-</div>
               </div>
             )}
 
@@ -647,7 +1009,6 @@ export default function TicketDetailPage() {
             {/* Управление */}
             {activeTab === 'manage' && (
               <div className="p-6 space-y-8">
-                {/* Текущий статус */}
                 <div className="bg-white/5 rounded-xl p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-2xl font-semibold text-white flex items-center gap-3">
@@ -661,7 +1022,6 @@ export default function TicketDetailPage() {
                   <p className="text-white/60 text-base">{STATUS_DESCRIPTIONS[ticket.status] || ''}</p>
                 </div>
 
-                {/* Изменение статуса */}
                 <div>
                   <h3 className="text-2xl font-semibold text-white mb-5 flex items-center gap-3">
                     <RefreshCw className="w-6 h-6 text-blue-400" />
@@ -715,7 +1075,6 @@ export default function TicketDetailPage() {
                   )}
                 </div>
 
-                {/* Назначение исполнителя */}
                 {canAssign && (
                   <div>
                     <h3 className="text-2xl font-semibold text-white mb-5 flex items-center gap-3">
@@ -769,7 +1128,7 @@ export default function TicketDetailPage() {
                             />
                           </div>
                           
-                          {loadingUsers ? (
+                          {loadingSupports ? (
                             <div className="flex justify-center py-6">
                               <Loader2 className="w-6 h-6 animate-spin text-white/30" />
                             </div>
@@ -882,6 +1241,7 @@ export default function TicketDetailPage() {
           </div>
         </div>
       </div>
+      
       {/* Модальное окно превью */}
       {previewFile && (
         <div 
@@ -924,10 +1284,9 @@ export default function TicketDetailPage() {
                 </div>
               )}
             </div>
-          </div>
+          </div>  
         </div>
       )}
     </div>
   );
 }
-  

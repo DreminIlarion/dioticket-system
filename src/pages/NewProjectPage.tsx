@@ -377,7 +377,7 @@ export default function NewProjectPage() {
         {/* Организация */}
         <div>
           <label className="block text-lg font-semibold text-white mb-2">
-            Организация <span className="text-red-400">*</span>
+            Контрагент <span className="text-red-400">*</span>
           </label>
           <div className="relative" ref={counterpartyDropdownRef}>
             <div className="relative">

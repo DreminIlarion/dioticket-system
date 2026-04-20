@@ -613,17 +613,7 @@ export default function CounterpartyDetailPage() {
           </div>
 
           {/* Информация о подразделениях */}
-          {counterparty.is_head && (
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-6">
-              <h3 className="text-xl font-semibold text-white mb-5 flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-white/60" />
-                Головная организация
-              </h3>
-              <p className="text-white/60 text-base">
-                Является головной компанией
-              </p>
-            </div>
-          )}
+          
         </div>
       </div>
     </div>

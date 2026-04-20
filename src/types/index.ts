@@ -153,6 +153,21 @@ export interface CounterpartyCustomer {
   updated_at: string;
 }
 
+
+export interface SimpleUser {
+  id: string;
+  email: string;
+  username: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  role: UserRole;
+  counterparty_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+
 // ========== ЗАЯВКИ (ТИКЕТЫ) ==========
 
 
@@ -294,6 +309,18 @@ export interface CreateTicketInput {
   priority: TicketPriority;
   counterparty_id?: string | null;
   tags?: TicketTag[];
+}
+
+export interface Comment {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  ticket_id: string;
+  author_id: string;
+  author_role: string;
+  text: string;
+  type: 'public' | 'internal' | 'note';
+  attachments: any[];
 }
 
 // ========== УВЕДОМЛЕНИЯ ==========

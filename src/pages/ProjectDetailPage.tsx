@@ -360,7 +360,7 @@ export default function ProjectDetailPage() {
                     <div className="bg-white/5 rounded-xl p-5">
                       <div className="flex items-center gap-2 text-white/50 text-xl mb-2">
                         <Building2 className="w-4 h-4" />
-                        <span>Организация</span>
+                        <span>Контрагент</span>
                       </div>
                       {counterparty ? (
                         <div>
@@ -661,7 +661,7 @@ export default function ProjectDetailPage() {
             <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-6">
               <h3 className="text-xl font-bold text-white mb-5 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-white/60" />
-                Организация
+                Контрагент
               </h3>
               
               <div className="space-y-3">

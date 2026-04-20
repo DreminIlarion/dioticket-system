@@ -74,6 +74,9 @@ interface SimpleUser {
 // Роли, которые могут выбирать контрагента
 const CAN_SELECT_COUNTERPARTY_ROLES = ['admin', 'support_agent', 'support_manager', 'executor'];
 
+// Тип выбора: 'project' или 'counterparty'
+type SelectionType = 'project' | 'counterparty' | null;
+
 export default function NewTicketPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -92,7 +95,10 @@ export default function NewTicketPage() {
   // Для customer - автоматический контрагент
   const [customerCounterparty, setCustomerCounterparty] = useState<Counterparty | null>(null);
   
-  // Для admin/support - выбор контрагента
+  // Для admin/support - выбор типа (проект или контрагент)
+  const [selectionType, setSelectionType] = useState<SelectionType>(null);
+  
+  // Для выбора контрагента
   const [selectedCounterparty, setSelectedCounterparty] = useState<Counterparty | null>(null);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [counterpartySearch, setCounterpartySearch] = useState('');
@@ -121,15 +127,13 @@ export default function NewTicketPage() {
 
   const isCustomer = user?.role === 'customer' || user?.role === 'customer_admin';
   const canSelectCounterparty = !isCustomer && CAN_SELECT_COUNTERPARTY_ROLES.includes(user?.role || '');
-  const canSelectReporter = !isCustomer; // Admin/support могут выбирать инициатора
-
-  // Получаем project_id из URL (если перешли из проекта)
-  const projectIdFromUrl = searchParams.get('project_id');
+  const canSelectReporter = !isCustomer;
 
   const counterpartyDropdownRef = useRef<HTMLDivElement>(null);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
   const reporterDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Закрытие дропдаунов при клике вне
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (counterpartyDropdownRef.current && !counterpartyDropdownRef.current.contains(event.target as Node)) {
@@ -170,54 +174,37 @@ export default function NewTicketPage() {
     }
   }, [canSelectCounterparty]);
 
-  // Загрузка проектов для ВСЕХ контрагентов (если выбран контрагент)
+  // Загрузка проектов для выбранного контрагента (когда выбран тип "контрагент")
   useEffect(() => {
-    if (selectedCounterparty) {
+    if (selectionType === 'counterparty' && selectedCounterparty) {
       loadProjects(selectedCounterparty.id);
-    } else {
+    } else if (selectionType === 'counterparty' && !selectedCounterparty) {
       setProjects([]);
     }
-  }, [selectedCounterparty]);
+  }, [selectionType, selectedCounterparty]);
 
-  // Загрузка пользователей для выбранного контрагента
+  // Загрузка пользователей для выбранного контрагента (для выбора инициатора)
   useEffect(() => {
     if (selectedCounterparty) {
       loadUsers(selectedCounterparty.id);
+    } else if (selectedProject && selectedProject.counterparty_id) {
+      // Если выбран проект, загружаем пользователей по контрагенту проекта
+      loadUsers(selectedProject.counterparty_id);
     } else {
       setUsers([]);
       setSelectedReporter(null);
       setReporterSearch('');
     }
-  }, [selectedCounterparty]);
+  }, [selectedCounterparty, selectedProject]);
 
-  // Если есть project_id из URL, загружаем проект
-  useEffect(() => {
-    if (projectIdFromUrl) {
-      loadProjectFromUrl(projectIdFromUrl);
-    }
-  }, [projectIdFromUrl]);
-
-  const loadProjectFromUrl = async (projectId: string) => {
-    try {
-      const project = await projectsApi.getById(projectId);
-      setSelectedProject(project);
-      setProjectSearch(`${project.key} - ${project.name}`);
-      
-      // Загружаем контрагента проекта, но НЕ ВЫБИРАЕМ его автоматически
-      // Просто показываем проект, а контрагент остаётся пустым
-      if (project.counterparty_id) {
-        // Можно подгрузить инфу о контрагенте, но не выбирать его
-        try {
-          const cp = await counterpartiesApi.getById(project.counterparty_id);
-          // Не вызываем setSelectedCounterparty, чтобы не создавать конфликт
-          // Просто сохраняем где-то или игнорируем
-        } catch (e) {
-          console.error('Failed to load project counterparty:', e);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load project from URL:', error);
-    }
+  // Сброс выбора контрагента/проекта при смене типа
+  const handleSelectionTypeChange = (type: SelectionType) => {
+    setSelectionType(type);
+    setSelectedCounterparty(null);
+    setSelectedProject(null);
+    setCounterpartySearch('');
+    setProjectSearch('');
+    setProjects([]);
   };
 
   const loadCustomerCounterparty = async () => {
@@ -269,7 +256,6 @@ export default function NewTicketPage() {
     setLoadingUsers(true);
     try {
       const response = await usersApi.getCustomers(counterpartyId, 1, 100);
-      // Преобразуем CounterpartyCustomer в формат, понятный компоненту
       const formattedUsers = response.items.map(customer => ({
         id: customer.id,
         username: customer.username,
@@ -278,7 +264,6 @@ export default function NewTicketPage() {
         role: customer.role,
       }));
       
-      // Добавляем текущего пользователя, если его нет в списке
       let allUsers = [...formattedUsers];
       const currentUserInList = formattedUsers.find(u => u.id === user?.user_id);
       
@@ -294,8 +279,6 @@ export default function NewTicketPage() {
       }
       
       setUsers(allUsers);
-      
-      // Не выбираем никого автоматически
       setSelectedReporter(null);
       setReporterSearch('');
     } catch (error) {
@@ -430,57 +413,81 @@ export default function NewTicketPage() {
     return allSuccess;
   };
 
+  
+  // Внутри компонента NewTicketPage, рядом с loadCounterparties и loadProjects
+const loadProjectsForAll = async () => {
+  setLoadingProjects(true);
+  try {
+    const response = await projectsApi.getAll(1, 100);
+    setProjects(response.items);
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+  } finally {
+    setLoadingProjects(false);
+  }
+};
+// Загрузка проектов для выбора (когда выбран тип "проект")
+useEffect(() => {
+  if (selectionType === 'project') {
+    loadProjectsForAll();
+  } else if (selectionType === 'counterparty' && selectedCounterparty) {
+    loadProjects(selectedCounterparty.id);
+  } else {
+    setProjects([]);
+  }
+}, [selectionType, selectedCounterparty]);
+
   const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      // Формируем payload
-      const ticketData: any = {
-        title,
-        description,
-        priority,
-        tags: tags.length > 0 ? tags : undefined,
-      };
-      
-      // ВАЖНО: Отправляем ТОЛЬКО то, что выбрано
-      // Если выбран проект - отправляем project_id, НЕ отправляем counterparty_id
-      if (selectedProject) {
-        ticketData.project_id = selectedProject.id;
-        // counterparty_id НЕ отправляем - бэкенд сам подставит из проекта
-      } 
-      // Если не выбран проект, но выбран контрагент
-      else if (selectedCounterparty) {
-        ticketData.counterparty_id = selectedCounterparty.id;
-      }
-      // Если ничего не выбрано - не отправляем ни project_id, ни counterparty_id (будет null на бэке)
-      
-      // Инициатор
-      if (isCustomer && user?.user_id) {
-        ticketData.reporter_id = user.user_id;
-      } else if (canSelectReporter) {
-        if (selectedReporter) {
-          ticketData.reporter_id = selectedReporter.id;
-        } else if (user?.user_id) {
-          ticketData.reporter_id = user.user_id;
-        }
-      }
-      
-      console.log('Submitting ticket data:', ticketData);
-      const ticket = await ticketsApi.create(ticketData);
-      
-      if (localFiles.length > 0) {
-        await uploadFiles(ticket.id);
-      }
-      
-      navigate('/tickets');
-    } catch (error: any) {
-      console.error('Failed to create ticket:', error);
-      if (error.response?.data?.detail) {
-        console.error('Validation error:', error.response.data.detail);
-      }
-    } finally {
-      setSubmitting(false);
+  setSubmitting(true);
+  try {
+    const ticketData: any = {
+      title,
+      description,
+      priority,
+      // Правильный формат для тегов — массив объектов с name и color
+      tags: tags.map(tag => ({
+        name: tag.name,
+        color: tag.color || '#64748b'   // если цвета нет — используем серый по умолчанию
+      })),
+    };
+
+    // Привязка
+    if (isCustomer && customerCounterparty) {
+      ticketData.counterparty_id = customerCounterparty.id;
+    } else if (selectedProject) {
+      ticketData.project_id = selectedProject.id;
+    } else if (selectedCounterparty) {
+      ticketData.counterparty_id = selectedCounterparty.id;
     }
-  };
+
+    // Репортёр
+    if (isCustomer && user?.user_id) {
+      ticketData.reporter_id = user.user_id;
+    } else if (canSelectReporter) {
+      if (selectedReporter) {
+        ticketData.reporter_id = selectedReporter.id;
+      } else if (user?.user_id) {
+        ticketData.reporter_id = user.user_id;
+      }
+    }
+
+    console.log('Submitting ticket data:', ticketData);
+    const ticket = await ticketsApi.create(ticketData);
+
+    if (localFiles.length > 0) {
+      await uploadFiles(ticket.id);
+    }
+
+    navigate('/tickets');
+  } catch (error: any) {
+    console.error('Failed to create ticket:', error);
+    if (error.response?.data?.detail) {
+      console.error('Backend error detail:', error.response.data.detail);
+    }
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
@@ -561,12 +568,72 @@ export default function NewTicketPage() {
         {/* Step 1 */}
         {step === 1 && (
           <div className="space-y-10">
-            {/* Выбор контрагента для admin/support */}
+            {/* Выбор типа: Проект или Контрагент (для admin/support) */}
             {canSelectCounterparty && (
               <div>
                 <label className="block text-2xl font-semibold text-white mb-4">
+                  Привязать заявку к
+                </label>
+                <div className="flex gap-4">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectionTypeChange('project')}
+                    className={`flex-1 flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 transition-all ${
+                      selectionType === 'project'
+                        ? 'border-purple-500 bg-purple-500/20 text-purple-400'
+                        : 'border-white/20 bg-white/5 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    <FolderOpen className="w-6 h-6" />
+                    <span className="text-lg font-medium">Проекту</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectionTypeChange('counterparty')}
+                    className={`flex-1 flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 transition-all ${
+                      selectionType === 'counterparty'
+                        ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+                        : 'border-white/20 bg-white/5 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    <Building2 className="w-6 h-6" />
+                    <span className="text-lg font-medium">Контрагенту</span>
+                  </button>
+                </div>
+                {selectionType === null && (
+                  <p className="text-white/40 text-sm mt-3 text-center">Выберите, к чему привязать заявку</p>
+                )}
+              </div>
+            )}
+            {canSelectCounterparty && (
+  <div className="mt-6">
+    <button
+      type="button"
+      onClick={() => {
+        setSelectionType(null);
+        setSelectedCounterparty(null);
+        setSelectedProject(null);
+        setCounterpartySearch('');
+        setProjectSearch('');
+      }}
+      className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 transition-all ${
+        selectionType === null
+          ? 'border-white bg-white/10 text-white'
+          : 'border-white/20 bg-white/5 text-white/60 hover:bg-white/10'
+      }`}
+    >
+      <span className="text-2xl">✕</span>
+      <span className="text-lg font-medium">Без привязки к проекту или контрагенту</span>
+    </button>
+  </div>
+)}
+
+            {/* Выбор контрагента (когда выбран тип "контрагент") */}
+            {canSelectCounterparty && selectionType === 'counterparty' && (
+              <div>
+                <label className="block text-2xl font-semibold text-white mb-4">
                   <Building2 className="inline w-6 h-6 mr-2 text-blue-400" />
-                  Контрагент <span className="text-white/40 text-sm">(опционально, если не выбран проект)</span>
+                  Выберите контрагента <span className="text-red-400">*</span>
                 </label>
                 <div className="relative" ref={counterpartyDropdownRef}>
                   <div className="relative">
@@ -596,26 +663,7 @@ export default function NewTicketPage() {
                           <p className="text-white/50 mt-3">Загрузка контрагентов...</p>
                         </div>
                       ) : (
-                        <div>
-                          {/* Опция "Без контрагента" */}
-                          <button
-                            onClick={() => {
-                              setSelectedCounterparty(null);
-                              setCounterpartySearch('');
-                              setShowCounterpartyDropdown(false);
-                            }}
-                            className="w-full text-left p-5 hover:bg-white/10 transition-colors border-b border-white/10"
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-xl bg-gray-500/20 flex items-center justify-center">
-                                <X className="w-5 h-5 text-gray-400" />
-                              </div>
-                              <div>
-                                <div className="font-semibold text-white text-base">Без контрагента</div>
-                                <div className="text-sm text-white/50">Заявка не будет привязана к контрагенту</div>
-                              </div>
-                            </div>
-                          </button>
+                        <>
                           {counterparties.map((cp) => (
                             <button
                               key={cp.id}
@@ -640,7 +688,7 @@ export default function NewTicketPage() {
                               </div>
                             </button>
                           ))}
-                        </div>
+                        </>
                       )}
                     </div>
                   )}
@@ -658,35 +706,12 @@ export default function NewTicketPage() {
               </div>
             )}
 
-            {/* Для customer - показываем его организацию */}
-            {isCustomer && customerCounterparty && (
+            {/* Выбор проекта (когда выбран тип "проект") */}
+            {canSelectCounterparty && selectionType === 'project' && (
               <div>
                 <label className="block text-2xl font-semibold text-white mb-4">
-                  <Building2 className="inline w-6 h-6 mr-2 text-blue-400" />
-                  Ваш контрагент
-                </label>
-                <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center">
-                      <Building2 className="w-7 h-7 text-blue-400" />
-                    </div>
-                    <div>
-                      <p className="text-xl font-semibold text-white">{customerCounterparty.name || customerCounterparty.legal_name}</p>
-                      {customerCounterparty.inn && (
-                        <p className="text-white/60">ИНН: {customerCounterparty.inn}</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Выбор проекта - показываем всегда, если есть выбранный контрагент */}
-            {selectedCounterparty && projects.length > 0 && (
-              <div>
-                <label className="block text-2xl font-semibold text-white mb-4">
-                  <FolderOpen className="inline w-6 h-6 mr-2 text-white-400" />
-                  Проект <span className="text-white/40 text-sm">(опционально)</span>
+                  <FolderOpen className="inline w-6 h-6 mr-2 text-purple-400" />
+                  Выберите проект <span className="text-red-400">*</span>
                 </label>
                 <div className="relative" ref={projectDropdownRef}>
                   <div className="relative">
@@ -697,9 +722,16 @@ export default function NewTicketPage() {
                       onChange={(e) => {
                         setProjectSearch(e.target.value);
                         setShowProjectDropdown(true);
+                        // Загружаем все проекты (без фильтра по контрагенту)
+                        if (projects.length === 0) {
+                          loadProjectsForAll();
+                        }
                       }}
-                      onFocus={() => setShowProjectDropdown(true)}
-                      placeholder="Выберите проект..."
+                      onFocus={() => {
+                        setShowProjectDropdown(true);
+                        if (projects.length === 0) loadProjectsForAll();
+                      }}
+                      placeholder="Поиск по названию или ключу проекта..."
                       className="input-field pl-12 py-5 text-lg w-full"
                     />
                   </div>
@@ -713,24 +745,6 @@ export default function NewTicketPage() {
                         </div>
                       ) : (
                         <>
-                          <button
-                            onClick={() => {
-                              setSelectedProject(null);
-                              setProjectSearch('');
-                              setShowProjectDropdown(false);
-                            }}
-                            className="w-full text-left p-5 hover:bg-white/10 transition-colors border-b border-white/10"
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-xl bg-gray-500/20 flex items-center justify-center">
-                                <X className="w-5 h-5 text-gray-400" />
-                              </div>
-                              <div>
-                                <div className="font-semibold text-white text-base">Без проекта</div>
-                                <div className="text-sm text-white/50">Заявка не будет привязана к проекту</div>
-                              </div>
-                            </div>
-                          </button>
                           {projects
                             .filter(p => !projectSearch || 
                               p.name.toLowerCase().includes(projectSearch.toLowerCase()) ||
@@ -776,15 +790,6 @@ export default function NewTicketPage() {
                       <span className="text-purple-400 font-semibold text-lg">
                         {selectedProject.key} - {selectedProject.name}
                       </span>
-                      <button
-                        onClick={() => {
-                          setSelectedProject(null);
-                          setProjectSearch('');
-                        }}
-                        className="ml-auto text-white/50 hover:text-red-400 transition-colors"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
                     </div>
                     <div className="mt-2 text-sm text-white/50">
                       (контрагент будет автоматически взят из проекта)
@@ -794,8 +799,31 @@ export default function NewTicketPage() {
               </div>
             )}
 
+            {/* Для customer - показываем его организацию (без выбора) */}
+            {isCustomer && customerCounterparty && (
+              <div>
+                <label className="block text-2xl font-semibold text-white mb-4">
+                  <Building2 className="inline w-6 h-6 mr-2 text-blue-400" />
+                  Ваш контрагент
+                </label>
+                <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                      <Building2 className="w-7 h-7 text-blue-400" />
+                    </div>
+                    <div>
+                      <p className="text-xl font-semibold text-white">{customerCounterparty.name || customerCounterparty.legal_name}</p>
+                      {customerCounterparty.inn && (
+                        <p className="text-white/60">ИНН: {customerCounterparty.inn}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Выбор инициатора для admin/support */}
-            {canSelectReporter && (
+            {canSelectReporter && (selectedCounterparty || selectedProject) && (
               <div>
                 <label className="block text-2xl font-semibold text-white mb-4">
                   <User className="inline w-6 h-6 mr-2 text-green-400" />
@@ -811,19 +839,13 @@ export default function NewTicketPage() {
                         setReporterSearch(e.target.value);
                         setShowReporterDropdown(true);
                       }}
-                      onFocus={() => {
-                        setShowReporterDropdown(true);
-                        if (selectedCounterparty && users.length === 0) {
-                          loadUsers(selectedCounterparty.id);
-                        }
-                      }}
-                      placeholder={selectedCounterparty ? "Выберите инициатора (по умолчанию - вы)" : "Сначала выберите контрагента"}
+                      onFocus={() => setShowReporterDropdown(true)}
+                      placeholder="Выберите инициатора (по умолчанию - вы)"
                       className="input-field pl-12 py-5 text-lg w-full"
-                      disabled={!selectedCounterparty}
                     />
                   </div>
                   
-                  {showReporterDropdown && selectedCounterparty && (
+                  {showReporterDropdown && (
                     <div className="absolute z-50 mt-2 w-full bg-[#0c0c0c] border border-white/20 rounded-xl shadow-2xl max-h-96 overflow-y-auto">
                       {loadingUsers ? (
                         <div className="p-8 text-center">
@@ -834,11 +856,10 @@ export default function NewTicketPage() {
                         <div className="p-8 text-center">
                           <User className="w-12 h-12 mx-auto mb-3 text-white/20" />
                           <p className="text-white/50 text-lg">Нет пользователей</p>
-                          <p className="text-white/30 text-sm mt-1">В контрагенте пока нет других пользователей</p>
+                          <p className="text-white/30 text-sm mt-1">У выбранного контрагента пока нет других пользователей</p>
                         </div>
                       ) : (
                         <>
-                          {/* Опция "Текущий пользователь (вы)" */}
                           <button
                             onClick={() => {
                               setSelectedReporter(null);
@@ -910,7 +931,7 @@ export default function NewTicketPage() {
                   </div>
                 )}
                 
-                {!selectedReporter && selectedCounterparty && !reporterSearch && (
+                {!selectedReporter && (
                   <div className="mt-4 p-5 rounded-xl bg-gray-500/10 border border-gray-500/30">
                     <div className="flex items-center gap-3">
                       <User className="w-6 h-6 text-gray-400" />
@@ -952,10 +973,9 @@ export default function NewTicketPage() {
           </div>
         )}
 
-        {/* Step 2 (остаётся без изменений) */}
+        {/* Step 2 */}
         {step === 2 && (
           <div className="space-y-12">
-            {/* AI Suggestion */}
             {aiLoading && (
               <div className="p-6 rounded-2xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 flex items-center gap-4">
                 <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
@@ -978,7 +998,6 @@ export default function NewTicketPage() {
               </div>
             )}
 
-            {/* Приоритет */}
             <div>
               <label className="block text-2xl font-semibold text-white mb-6">Приоритет заявки</label>
               <div className="flex flex-wrap gap-3">
@@ -1004,7 +1023,6 @@ export default function NewTicketPage() {
               </div>
             </div>
 
-            {/* Теги */}
             <div>
               <label className="block text-2xl font-semibold text-white mb-6">Теги заявки</label>
 
@@ -1097,7 +1115,6 @@ export default function NewTicketPage() {
               )}
             </div>
 
-            {/* Files Upload */}
             <div>
               <label className="block text-2xl font-semibold text-white mb-4">
                 <Upload className="inline w-6 h-6 mr-2 text-green-400" />
@@ -1171,7 +1188,6 @@ export default function NewTicketPage() {
             </div>
 
             <div className="space-y-8">
-              {/* Если выбран проект - показываем проект */}
               {selectedProject && (
                 <div className="p-8 rounded-3xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/30">
                   <p className="text-xl text-white/50 mb-3 flex items-center gap-2">
@@ -1195,7 +1211,6 @@ export default function NewTicketPage() {
                 </div>
               )}
 
-              {/* Если не выбран проект, но выбран контрагент - показываем контрагента */}
               {!selectedProject && selectedCounterparty && (
                 <div className="p-8 rounded-3xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
                   <p className="text-xl text-white/50 mb-3 flex items-center gap-2">
@@ -1218,8 +1233,7 @@ export default function NewTicketPage() {
                 </div>
               )}
 
-              {/* Если customer - показываем его контрагента */}
-              {isCustomer && customerCounterparty && !selectedProject && (
+              {isCustomer && customerCounterparty && !selectedProject && !selectedCounterparty && (
                 <div className="p-8 rounded-3xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
                   <p className="text-xl text-white/50 mb-3 flex items-center gap-2">
                     <Building2 className="w-5 h-5" />
@@ -1241,16 +1255,15 @@ export default function NewTicketPage() {
                 </div>
               )}
 
-              {/* Если ничего не выбрано */}
-              {!selectedProject && !selectedCounterparty && !isCustomer && (
-                <div className="p-8 rounded-3xl bg-yellow-500/10 border border-yellow-500/30">
-                  <p className="text-yellow-400 text-center text-lg">
-                    ℹ️ Заявка создаётся без привязки к контрагенту и проекту
-                  </p>
-                </div>
-              )}
+              {/* Без привязки */}
+{canSelectCounterparty && selectionType === null && (
+  <div className="p-8 rounded-3xl bg-yellow-500/10 border border-yellow-500/30">
+    <p className="text-yellow-400 text-center text-lg">
+      ℹ️ Заявка создаётся без привязки к контрагенту и проекту
+    </p>
+  </div>
+)}
 
-              {/* Инициатор */}
               <div className="p-8 rounded-3xl bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30">
                 <p className="text-xl text-white/50 mb-3 flex items-center gap-2">
                   <User className="w-5 h-5" />
@@ -1378,3 +1391,4 @@ export default function NewTicketPage() {
     </div>
   );
 }
+

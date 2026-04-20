@@ -115,7 +115,7 @@ export default function CounterpartiesPage() {
         <div>
           <h1 className="text-4xl md:text-5xl font-bold text-white mb-2">Контрагенты</h1>
           <p className="text-xl text-white/60">
-            Управление организациями и клиентами • {totalItems} {totalItems === 1 ? 'запись' : 'записей'}
+            Управление контрагентом и клиентами • {totalItems} {totalItems === 1 ? 'запись' : 'записей'}
           </p>
         </div>
         <button
