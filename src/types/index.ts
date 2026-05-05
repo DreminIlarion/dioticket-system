@@ -482,3 +482,67 @@ export interface CreateTicketInput {
 }
 
 
+
+
+// ==================== PRODUCT ====================
+
+export interface Product {
+  id: string;
+  name: string;
+  vendor: string;
+  category: string;
+  description?: string;
+  version?: string;
+  status: string;
+  attributes: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+  display_name?: string;
+  created_by?: string;
+  updated_by?: string;
+}
+
+export interface ProductsListResponse {
+  page: number;
+  size: number;
+  total_items: number;
+  total_pages: number;
+  has_next: boolean;
+  has_prev: boolean;
+  items: Product[];
+}
+
+export interface JsonSchemaProperty {
+  type?: string;
+  title?: string;
+  description?: string;
+  enum?: string[];
+  default?: any;
+  items?: {
+    type?: string;
+  };
+  anyOf?: JsonSchemaProperty[];
+}
+
+export interface ProductAttributesSchemaResponse {
+  category: string;
+  schema: {
+    type: string;
+    title?: string;
+    description?: string;
+    required?: string[];
+    properties: Record<string, JsonSchemaProperty>;
+    additionalProperties?: boolean;
+    $schema?: string;
+  };
+}
+
+export interface CreateProductPayload {
+  name: string;
+  vendor: string;
+  category: string;
+  description?: string;
+  version?: string;
+  status: string;
+  attributes: Record<string, any>;
+}

@@ -1,0 +1,18 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: diocon-tickets-frontend
+    ports:
+      - "3001:80"
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    networks:
+      - diocon-tickets_default
+
+networks:
+  diocon-tickets_default:
+    external: true
+    name: diocon-tickets_default  

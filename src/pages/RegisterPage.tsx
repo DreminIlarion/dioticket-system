@@ -57,7 +57,7 @@ export default function RegisterPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-[#0a0a0a]">
         <div className="glass-card-static p-8 max-w-md w-full text-center">
-          <h2 className="text-xl font-semibold text-white mb-4">Недействительная ссылка</h2>
+          <h2 className="text-[16px] font-semibold text-white mb-4">Недействительная ссылка</h2>
           <p className="text-white/50 mb-6">Ссылка приглашения недействительна или истекла.</p>
           <button onClick={() => navigate('/login')} className="btn-primary">
             Перейти к входу
@@ -74,7 +74,7 @@ export default function RegisterPage() {
           <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-8 h-8 text-green-400" />
           </div>
-          <h2 className="text-xl font-semibold text-white mb-2">Регистрация завершена!</h2>
+          <h2 className="text-[16px] font-semibold text-white mb-2">Регистрация завершена!</h2>
           <p className="text-white/50">Переход на страницу входа...</p>
         </div>
       </div>
@@ -101,7 +101,7 @@ export default function RegisterPage() {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="glass-card-static p-8">
-          <h2 className="text-xl font-semibold text-white mb-6 text-center">Регистрация</h2>
+          <h2 className="text-[16px] font-semibold text-white mb-6 text-center">Регистрация</h2>
           
           <div className="space-y-5">
             <div>

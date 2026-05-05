@@ -70,7 +70,6 @@ export const attachmentsApi = {
     return response.data;
   },
 
-  // 🔽 НОВЫЕ МЕТОДЫ 🔽
 
   // Получить информацию о вложении по ID
   async getAttachment(attachmentId: string): Promise<Attachment> {

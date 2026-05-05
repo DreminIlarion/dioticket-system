@@ -1,44 +1,265 @@
-import { useState, useEffect } from 'react';
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  useCallback,
+  type ReactNode,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Plus, 
-  Search, 
+import {
+  Plus,
+  Search,
   Building2,
   Phone,
   Mail,
   ChevronRight,
   ChevronLeft,
-  Filter,
   Loader2,
   Users,
   User,
   Briefcase,
   GitBranch,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Check,
+  X,
+  Filter,
+  Calendar,
+  Hash,
 } from 'lucide-react';
 import { counterpartiesApi } from '../api/client';
 import type { Counterparty } from '../types';
 
-export default function CounterpartiesPage() {
-  const navigate = useNavigate();
-  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
-  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+// ─── Константы ────────────────────────────────────────────────────────────────
+
+const TYPE_OPTIONS = [
+  {
+    value: 'Юридическое лицо',
+    label: 'Юридическое лицо',
+    icon: <Building2 className="w-4 h-4 text-white/40" />,
+  },
+  {
+    value: 'Физическое лицо',
+    label: 'Физическое лицо',
+    icon: <User className="w-4 h-4 text-white/40" />,
+  },
+  {
+    value: 'ИП',
+    label: 'ИП',
+    icon: <Briefcase className="w-4 h-4 text-white/40" />,
+  },
+] as const;
+
+interface DropdownOption {
+  value: string;
+  label: string;
+  icon?: ReactNode;
+  sublabel?: string;
+}
+
+// ─── Кастомный dropdown ──────────────────────────────────────────────────────
+
+function FilterDropdown({
+  label,
+  icon,
+  options,
+  value,
+  onChange,
+  placeholder = 'Все',
+  searchable = false,
+}: {
+  label: string;
+  icon?: ReactNode;
+  options: DropdownOption[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  searchable?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [openUp, setOpenUp] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
 
   useEffect(() => {
-    loadCounterparties();
-  }, [page]);
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
-  const loadCounterparties = async () => {
+  useEffect(() => {
+    if (open && searchable) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+    if (!open) setQuery('');
+  }, [open, searchable]);
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setOpenUp(window.innerHeight - rect.bottom < 260);
+    setAlignRight(window.innerWidth - rect.left < 240);
+  }, [open]);
+
+  const selected = options.find(o => o.value === value);
+
+  const filtered = query
+    ? options.filter(o =>
+        o.label.toLowerCase().includes(query.toLowerCase()) ||
+        (o.sublabel && o.sublabel.toLowerCase().includes(query.toLowerCase()))
+      )
+    : options;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <p className="text-xs uppercase tracking-wider text-white/30 mb-1.5 flex items-center gap-2">
+        {icon}
+        {label}
+      </p>
+
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`
+          w-full flex items-center justify-between gap-2 px-3.5 py-3 rounded-xl border text-base transition-all
+          ${open
+            ? 'bg-white/[0.08] border-red-500/40 text-white'
+            : value
+              ? 'bg-white/[0.06] border-white/[0.12] text-white/90'
+              : 'bg-white/[0.03] border-white/[0.08] text-white/50 hover:border-white/[0.15] hover:text-white/70'
+          }
+        `}
+      >
+        <span className="truncate">
+          {selected ? selected.label : placeholder}
+        </span>
+
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {value ? (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange('');
+                setOpen(false);
+              }}
+              className="p-0.5 rounded hover:bg-white/10 text-white/30 hover:text-white/60 transition-colors cursor-pointer"
+            >
+              <X size={13} />
+            </span>
+          ) : (
+            <ChevronDown
+              size={15}
+              className={`text-white/25 transition-transform ${open ? 'rotate-180' : ''}`}
+            />
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div
+          className={`
+            absolute z-[100] min-w-[220px] w-full max-w-[320px]
+            bg-[#1d1d1d] border border-white/[0.1] rounded-xl overflow-hidden
+            ${openUp ? 'bottom-full mb-2' : 'top-full mt-2'}
+            ${alignRight ? 'right-0' : 'left-0'}
+          `}
+          style={{ boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}
+        >
+          {searchable && (
+            <div className="p-2 border-b border-white/[0.06]">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/25" />
+                <input
+                  ref={inputRef}
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Поиск..."
+                  className="w-full pl-8 pr-3 py-2 rounded-lg glass-card border border-white/[0.06]
+                             text-sm text-white placeholder-white/25 focus:outline-none focus:border-white/[0.15]"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-64 overflow-y-auto py-1">
+            <button
+              type="button"
+              onClick={() => { onChange(''); setOpen(false); }}
+              className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-left text-base transition-colors
+                ${!value ? 'bg-red-500/10 text-white' : 'text-white/55 hover:glass-card'}
+              `}
+            >
+              {!value ? <Check size={14} className="text-red-400" /> : <span className="w-[14px]" />}
+              <span>{placeholder}</span>
+            </button>
+
+            <div className="h-px bg-white/[0.06] mx-3 my-1" />
+
+            {filtered.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-white/30">Ничего не найдено</div>
+            ) : (
+              filtered.map(opt => {
+                const active = opt.value === value;
+                return (
+                  <button
+                    type="button"
+                    key={opt.value}
+                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                    className={`
+                      w-full flex items-center gap-3 px-4 py-2.5 text-left text-base transition-colors
+                      ${active ? 'bg-red-500/10 text-white' : 'text-white/65 hover:glass-card'}
+                    `}
+                  >
+                    {active ? <Check size={14} className="text-red-400 flex-shrink-0" /> : <span className="w-[14px] flex-shrink-0" />}
+                    {opt.icon}
+                    <div className="min-w-0">
+                      <span className="block truncate">{opt.label}</span>
+                      {opt.sublabel && (
+                        <span className="block text-xs text-white/30 truncate">{opt.sublabel}</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Основной компонент ───────────────────────────────────────────────────────
+
+export default function CounterpartiesPage() {
+  const navigate = useNavigate();
+
+  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
+  const [loading, setLoading]               = useState(false);
+  const [page, setPage]                     = useState(1);
+  const [totalPages, setTotalPages]         = useState(1);
+  const [totalItems, setTotalItems]         = useState(0);
+
+  const [search, setSearch]                 = useState('');
+  const [typeFilter, setTypeFilter]         = useState('');
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+
+  const loadCounterparties = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await counterpartiesApi.getAll(page, 50);
+      const response = await counterpartiesApi.getAll(page, 10);
       setCounterparties(response.items);
       setTotalPages(response.total_pages);
       setTotalItems(response.total_items);
@@ -47,58 +268,108 @@ export default function CounterpartiesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page]);
 
-  // Группировка: головные компании и их подразделения
-  const headCompanies = counterparties.filter(cp => !cp.parent_id && !cp.is_branch);
-  const branchesByParent = new Map<string, Counterparty[]>();
-  
-  counterparties.forEach(cp => {
-    if (cp.parent_id && cp.is_branch) {
-      const parentId = cp.parent_id;
-      if (!branchesByParent.has(parentId)) {
-        branchesByParent.set(parentId, []);
+  useEffect(() => {
+    loadCounterparties();
+  }, [loadCounterparties]);
+
+  // ─── Группировка ─────────────────────────────────────────────────────────
+
+  const headCompanies = useMemo(
+    () => counterparties.filter(cp => !cp.parent_id && !cp.is_branch),
+    [counterparties]
+  );
+
+  const branchesByParent = useMemo(() => {
+    const map = new Map<string, Counterparty[]>();
+    counterparties.forEach(cp => {
+      if (cp.parent_id && cp.is_branch) {
+        if (!map.has(cp.parent_id)) map.set(cp.parent_id, []);
+        map.get(cp.parent_id)!.push(cp);
       }
-      branchesByParent.get(parentId)!.push(cp);
-    }
-  });
+    });
+    map.forEach(branches => branches.sort((a, b) => a.name.localeCompare(b.name)));
+    return map;
+  }, [counterparties]);
+
+  const normalizedSearch = search.trim().toLowerCase();
+
+  const matchesText = (value?: string | null) =>
+    (value || '').toLowerCase().includes(normalizedSearch);
+
+  const branchMatchesSearch = (branch: Counterparty) =>
+    matchesText(branch.name) ||
+    matchesText(branch.legal_name) ||
+    matchesText(branch.email) ||
+    matchesText(branch.phone) ||
+    (branch.inn || '').includes(search);
+
+  const filteredCompanies = useMemo(() => {
+    return headCompanies.filter(company => {
+      const branches = branchesByParent.get(company.id) || [];
+
+      const matchesCompany =
+        !normalizedSearch ||
+        matchesText(company.name) ||
+        matchesText(company.legal_name) ||
+        matchesText(company.email) ||
+        matchesText(company.phone) ||
+        (company.inn || '').includes(search);
+
+      const matchesBranch = normalizedSearch
+        ? branches.some(branchMatchesSearch)
+        : false;
+
+      const matchesSearch = matchesCompany || matchesBranch;
+      const matchesType = !typeFilter || company.counterparty_type === typeFilter;
+
+      return matchesSearch && matchesType;
+    });
+  }, [headCompanies, branchesByParent, normalizedSearch, search, typeFilter]);
+
+  const visibleBranchesCount = useMemo(
+    () => counterparties.filter(cp => cp.is_branch).length,
+    [counterparties]
+  );
+
+  const visibleActiveCount = useMemo(
+    () => counterparties.filter(cp => cp.is_active).length,
+    [counterparties]
+  );
 
   const toggleCompany = (companyId: string) => {
-    const newExpanded = new Set(expandedCompanies);
-    if (newExpanded.has(companyId)) {
-      newExpanded.delete(companyId);
-    } else {
-      newExpanded.add(companyId);
-    }
-    setExpandedCompanies(newExpanded);
-  };
-
-  const filteredCounterparties = headCompanies.filter(cp => {
-    const matchesSearch = !search || 
-      cp.name.toLowerCase().includes(search.toLowerCase()) ||
-      cp.inn.includes(search) ||
-      cp.email?.toLowerCase().includes(search.toLowerCase());
-    const matchesType = !typeFilter || cp.counterparty_type === typeFilter;
-    return matchesSearch && matchesType;
-  });
-
-  const getTypeIcon = (type: string, isBranch: boolean = false) => {
-    const size = isBranch ? "w-6 h-6" : "w-10 h-10";
-    switch (type) {
-      case 'Юридическое лицо': return <Building2 className={`${size} text-red-400`} />;
-      case 'Физическое лицо': return <User className={`${size} text-blue-400`} />;
-      case 'ИП': return <Briefcase className={`${size} text-amber-400`} />;
-      default: return <Building2 className={`${size} text-red-400`} />;
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
+    setExpandedCompanies(prev => {
+      const next = new Set(prev);
+      if (next.has(companyId)) next.delete(companyId);
+      else next.add(companyId);
+      return next;
     });
   };
+
+  const resetFilters = () => {
+    setSearch('');
+    setTypeFilter('');
+  };
+
+  const hasFilters = !!(search || typeFilter);
+
+  const getTypeIcon = (type: string, size: 'sm' | 'md' = 'md') => {
+    const cls = size === 'sm' ? 'w-4 h-4' : 'w-6 h-6';
+    switch (type) {
+      case 'Юридическое лицо': return <Building2 className={`${cls} text-white/40`} />;
+      case 'Физическое лицо': return <User className={`${cls} text-white/40`} />;
+      case 'ИП': return <Briefcase className={`${cls} text-white/40`} />;
+      default: return <Building2 className={`${cls} text-white/40`} />;
+    }
+  };
+
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
 
   if (loading && counterparties.length === 0) {
     return (
@@ -109,252 +380,387 @@ export default function CounterpartiesPage() {
   }
 
   return (
-    <div className=" space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+    <div className="space-y-8">
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
         <div>
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-2">Контрагенты</h1>
-          <p className="text-xl text-white/60">
-            Управление контрагентом и клиентами • {totalItems} {totalItems === 1 ? 'запись' : 'записей'}
+          <h1 className="text-3xl md:text-4xl font-bold text-white mb-1.5">Контрагенты</h1>
+          <p className="text-base text-white/50">
+            Управление компаниями и подразделениями
+            {totalItems > 0 && (
+              <span className="ml-2 px-2 py-0.5 rounded-full bg-white/[0.08] text-white/50 text-sm">
+                {totalItems}
+              </span>
+            )}
           </p>
         </div>
+
         <button
           onClick={() => navigate('/counterparties/new')}
-          className="btn-primary py-4 px-8 text-lg font-semibold"
+          className="flex items-center gap-2 px-5 py-3 rounded-xl bg-red-800 hover:bg-red-700
+                     text-white text-base font-semibold transition-colors "
         >
-          <Plus className="w-6 h-6" />
+          <Plus className="w-5 h-5" />
           Добавить контрагента
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="glass-card p-6">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/40" />
+      {/* ── Filters ──────────────────────────────────────────────────────── */}
+      <div className="space-y-4">
+        <div className="flex flex-col xl:flex-row gap-3">
+          <div className="flex-1 relative mt-5">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 pointer-events-none" />
             <input
               type="text"
-              placeholder="Поиск по названию, ИНН или email..."
+              placeholder="Поиск по названию, ИНН, email или подразделению..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="input-field pl-14 py-4 text-lg"
+              className="w-full pl-12 pr-10 py-3 glass-card border border-white/[0.08]
+                         rounded-xl text-white text-base placeholder-white/30
+                         focus:outline-none focus:border-red-500/40 focus:ring-2 focus:ring-red-500/10
+                         transition-all"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-md
+                           text-white/30 hover:text-white/60 hover:bg-white/[0.06] transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="w-full xl:w-[260px]">
+            <FilterDropdown
+              label="Тип контрагента"
+              icon={<Filter className="w-3.5 h-3.5" />}
+              options={TYPE_OPTIONS.map(t => ({
+                value: t.value,
+                label: t.label,
+                icon: t.icon,
+              }))}
+              value={typeFilter}
+              onChange={setTypeFilter}
+              placeholder="Все типы"
+              searchable
             />
           </div>
-          <div className="relative">
-            <Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-            <select
-              value={typeFilter}
-              onChange={e => setTypeFilter(e.target.value)}
-              className="select-field pl-12 py-4 pr-12 text-lg min-w-[220px]"
-            >
-              <option value="">Все типы</option>
-              <option value="Юридическое лицо">Юридическое лицо</option>
-              <option value="Физическое лицо">Физическое лицо</option>
-              <option value="ИП">ИП</option>
-            </select>
-          </div>
         </div>
+
+        {hasFilters && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-white/30">Фильтры:</span>
+
+            {search && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm
+                               bg-white/[0.06] text-white/70 border border-white/[0.08]">
+                <Search size={12} />
+                «{search}»
+                <span
+                  onClick={() => setSearch('')}
+                  className="cursor-pointer text-white/30 hover:text-white/60"
+                >
+                  <X size={12} />
+                </span>
+              </span>
+            )}
+
+            {typeFilter && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm
+                               bg-red-500/10 text-red-400 border border-red-500/20">
+                {TYPE_OPTIONS.find(t => t.value === typeFilter)?.label}
+                <span
+                  onClick={() => setTypeFilter('')}
+                  className="cursor-pointer text-red-400/60 hover:text-red-400"
+                >
+                  <X size={12} />
+                </span>
+              </span>
+            )}
+
+            <button
+              onClick={resetFilters}
+              className="text-sm text-white/35 hover:text-white/60 transition-colors ml-1"
+            >
+              Сбросить всё
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Companies Grid */}
-      {filteredCounterparties.length === 0 ? (
-        <div className="glass-card p-16 text-center">
-          <Building2 className="w-24 h-24 text-white/20 mx-auto mb-6" />
-          <h3 className="text-3xl font-bold text-white mb-3">Нет контрагентов</h3>
-          <p className="text-xl text-white/50 mb-8">
-            {search || typeFilter ? 'Попробуйте изменить параметры поиска' : 'Добавьте первого контрагента'}
+      {/* ── Stats ────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'На странице', value: counterparties.length, icon: Building2 },
+          { label: 'Головные', value: headCompanies.length, icon: Users },
+          { label: 'Подразделения', value: visibleBranchesCount, icon: GitBranch },
+          { label: 'Активные', value: visibleActiveCount, icon: Check },
+        ].map(stat => (
+          <div
+            key={stat.label}
+            className="glass-card rounded-2xl border border-white/[0.08] p-4 flex items-center gap-3.5"
+          >
+            <div className="w-11 h-11 rounded-xl bg-white/[0.06] flex items-center justify-center flex-shrink-0">
+              <stat.icon className="w-5 h-5 text-white/35" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{stat.value}</p>
+              <p className="text-sm text-white/40">{stat.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── List ─────────────────────────────────────────────────────────── */}
+      {filteredCompanies.length === 0 ? (
+        <div className="glass-card rounded-2xl border border-white/[0.08] p-16 text-center">
+          <Building2 className="w-16 h-16 text-white/10 mx-auto mb-4" />
+          <h3 className="text-xl font-bold text-white mb-2">Нет контрагентов</h3>
+          <p className="text-base text-white/50 mb-6">
+            {hasFilters ? 'Попробуйте изменить параметры поиска' : 'Добавьте первого контрагента'}
           </p>
-          {!search && !typeFilter && (
+          {!hasFilters && (
             <button
               onClick={() => navigate('/counterparties/new')}
-              className="btn-primary py-4 px-8 text-lg"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700
+                         text-white text-base font-medium transition-colors"
             >
-              <Plus className="w-6 h-6" />
+              <Plus className="w-4 h-4" />
               Добавить контрагента
             </button>
           )}
         </div>
       ) : (
-        <div className="space-y-6">
-          {filteredCounterparties.map(company => {
-            const branches = branchesByParent.get(company.id) || [];
-            const hasBranches = branches.length > 0;
-            const isExpanded = expandedCompanies.has(company.id);
+        <div className="space-y-4">
+          {loading && (
+            <div className="flex justify-center py-2">
+              <Loader2 className="w-5 h-5 animate-spin text-white/20" />
+            </div>
+          )}
 
-            return (
-              <div key={company.id} className="glass-card overflow-hidden">
-                {/* Головная компания - кликабельная область */}
-                <div 
-                  className="p-6 cursor-pointer hover:bg-white/[0.05] transition-colors"
-                  onClick={() => navigate(`/counterparties/${company.id}`)}
-                >
-                  <div className="flex items-start gap-5">
-                    {/* Иконка */}
-                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-700/30 to-red-900/30 flex items-center justify-center flex-shrink-0">
-                      {getTypeIcon(company.counterparty_type)}
-                    </div>
-                    
-                    {/* Основная информация */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <h2 className="text-2xl font-bold text-white mb-1 group-hover:text-red-400 transition-colors">
-                            {company.name}
-                          </h2>
-                          <p className="text-base text-white/50">{company.legal_name}</p>
-                        </div>
-                        
-                        {/* Индикатор наличия подразделений */}
-                        {hasBranches && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleCompany(company.id);
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors text-white"
-                          >
-                            {isExpanded ? (
-                              <>
-                                <ChevronUp className="w-5 h-5" />
-                                <span className="text-base">Скрыть подразделения</span>
-                              </>
-                            ) : (
-                              <>
-                                <ChevronDown className="w-5 h-5" />
-                                <GitBranch className="w-5 h-5" />
-                                <span className="text-base font-medium">{branches.length} подразделения</span>
-                              </>
-                            )}
-                          </button>
-                        )}
-                      </div>
-                      
-                      {/* Бейджи */}
-                      <div className="flex flex-wrap gap-3 mt-4">
-                        <span className="px-4 py-1.5 rounded-xl text-base font-medium bg-white/10 text-white/80">
-                          {company.counterparty_type}
-                        </span>
-                        <span className={`px-4 py-1.5 rounded-xl text-base font-medium ${
-                          company.is_active ? 'bg-green-500/20 text-green-400' : 'bg-neutral-500/20 text-neutral-400'
-                        }`}>
-                          {company.is_active ? 'Активен' : 'Неактивен'}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <ChevronRight className="w-7 h-7 text-white/30 group-hover:text-red-400 group-hover:translate-x-1 transition-all flex-shrink-0" />
-                  </div>
 
-                  {/* Детальная информация */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-6 pt-6 border-t border-white/10">
-                    <div className="flex items-center gap-3">
-                      <span className="text-base font-medium text-white/40 min-w-[50px]">ИНН:</span>
-                      <span className="text-base text-white font-mono">{company.inn}</span>
-                    </div>
-                    {company.kpp && (
-                      <div className="flex items-center gap-3">
-                        <span className="text-base font-medium text-white/40 min-w-[50px]">КПП:</span>
-                        <span className="text-base text-white font-mono">{company.kpp}</span>
-                      </div>
-                    )}
-                    {company.phone && (
-                      <div className="flex items-center gap-3">
-                        <Phone className="w-5 h-5 text-white/40" />
-                        <span className="text-base text-white">{company.phone}</span>
-                      </div>
-                    )}
-                    {company.email && (
-                      <div className="flex items-center gap-3">
-                        <Mail className="w-5 h-5 text-white/40" />
-                        <span className="text-base text-white truncate">{company.email}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3">
-                      <span className="text-base text-white/40">Создан:</span>
-                      <span className="text-base text-white/60">{formatDate(company.created_at)}</span>
-                    </div>
-                  </div>
+{filteredCompanies.map(company => {
+  const branches = branchesByParent.get(company.id) || [];
+  const hasBranches = branches.length > 0;
+  const matchedBranch = normalizedSearch
+    ? branches.some(branchMatchesSearch)
+    : false;
+  const isExpanded = expandedCompanies.has(company.id) || matchedBranch;
 
-                  {/* Контактное лицо */}
-                  {company.contact_person && (
-                    <div className="mt-5 pt-5 border-t border-white/10">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-                          <Users className="w-5 h-5 text-white/60" />
-                        </div>
-                        <div>
-                          <p className="text-base font-semibold text-white">{company.contact_person.full_name}</p>
-                          <p className="text-sm text-white/50">Контактное лицо</p>
-                        </div>
-                      </div>
-                    </div>
+  const contactPerson =
+    (company as any).contact_person ||
+    ((company as any).contact_persons?.[0] ?? null);
+
+  return (
+    <div
+      key={company.id}
+      className="glass-card rounded-2xl border border-white/[0.08] overflow-hidden"
+    >
+      {/* Main company - весь блок кликабельный */}
+      <div 
+        className="p-5 sm:p-6 cursor-pointer transition-all hover:bg-white/[0.02]"
+        onClick={() => navigate(`/counterparties/${company.id}`)}
+      >
+        <div className="flex items-start gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-white/[0.06] flex items-center justify-center flex-shrink-0">
+            {getTypeIcon(company.counterparty_type)}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                  <h2 className="text-xl font-bold text-white truncate">
+                    {company.name}
+                  </h2>
+
+                  <span className={`px-2.5 py-1 rounded-lg text-sm font-medium border ${
+                    company.is_active
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : 'bg-white/[0.06] text-white/40 border-white/[0.1]'
+                  }`}>
+                    {company.is_active ? 'Активен' : 'Неактивен'}
+                  </span>
+
+                  {hasBranches && (
+                    <span className="px-2.5 py-1 rounded-lg text-sm font-medium bg-white/[0.06] text-white/50 border border-white/[0.08]">
+                      {branches.length} подраздел.
+                    </span>
                   )}
                 </div>
 
-                {/* Подразделения (если есть и развёрнуты) */}
-                {hasBranches && isExpanded && (
-                  <div className="border-t border-white/10 bg-white/[0.03] p-6">
-                    <div className="flex items-center gap-3 mb-5">
-                      <div className="w-1 h-6 rounded-full bg-red-500" />
-                      <h3 className="text-xl font-semibold text-white flex items-center gap-2">
-                        <GitBranch className="w-5 h-5" />
-                        Обособленные подразделения
-                      </h3>
-                      <span className="px-3 py-1 rounded-full bg-red-500/20 text-red-400 text-sm font-medium">
-                        {branches.length}
+                {company.legal_name && (
+                  <p className="text-white/45 text-base truncate">{company.legal_name}</p>
+                )}
+
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <span className="px-2.5 py-1 rounded-lg text-sm bg-white/[0.05] text-white/65 border border-white/[0.06]">
+                    {company.counterparty_type}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg text-sm bg-white/[0.05] text-white/65 border border-white/[0.06] font-mono">
+                    ИНН {company.inn}
+                  </span>
+                  {company.kpp && (
+                    <span className="px-2.5 py-1 rounded-lg text-sm bg-white/[0.05] text-white/65 border border-white/[0.06] font-mono">
+                      КПП {company.kpp}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-x-5 gap-y-2 mt-4 text-sm text-white/40">
+                  {company.phone && (
+                    <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <Phone className="w-3.5 h-3.5" />
+                      {company.phone}
+                    </span>
+                  )}
+                  {company.email && (
+                    <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <Mail className="w-3.5 h-3.5" />
+                      {company.email}
+                    </span>
+                  )}
+                  {contactPerson?.full_name && (
+                    <span className="flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5" />
+                      {contactPerson.full_name}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {formatDate(company.created_at)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                {hasBranches && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCompany(company.id);
+                    }}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-xl
+                               bg-white/[0.05] hover:bg-white/[0.08]
+                               text-white/65 hover:text-white transition-colors"
+                  >
+                    {isExpanded ? (
+                      <>
+                        <ChevronUp className="w-4 h-4" />
+                        <span className="text-sm font-medium">Скрыть</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-4 h-4" />
+                        <span className="text-sm font-medium">Подразделения</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/counterparties/${company.id}`);
+                  }}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl
+                             bg-red-700/15 hover:bg-red-700/25
+                             text-red-400 hover:text-red-300 transition-colors"
+                >
+                  <span className="text-sm font-medium">Открыть</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Branches - остаётся без изменений */}
+      {hasBranches && isExpanded && (
+        <div className="border-t border-white/[0.08] bg-white/[0.02] px-5 sm:px-6 py-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-1 h-5 rounded-full bg-red-500" />
+            <p className="text-sm font-semibold text-white/70 flex items-center gap-2">
+              <GitBranch className="w-4 h-4" />
+              Подразделения
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            {branches.map(branch => {
+              const branchIsMatched = normalizedSearch ? branchMatchesSearch(branch) : false;
+              return (
+                <button
+                  key={branch.id}
+                  type="button"
+                  onClick={() => navigate(`/counterparties/${branch.id}`)}
+                  className={`
+                    w-full flex items-start gap-3 p-4 rounded-xl border text-left transition-all
+                    ${branchIsMatched
+                      ? 'bg-red-500/[0.06] border-red-500/20'
+                      : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.06] hover:border-white/[0.1]'
+                    }
+                  `}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center flex-shrink-0">
+                    {getTypeIcon(branch.counterparty_type, 'sm')}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="text-white font-semibold text-base truncate">
+                        {branch.name}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-xs bg-white/[0.05] text-white/40 border border-white/[0.06]">
+                        подразделение
                       </span>
                     </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {branches.map((branch) => (
-                        <div
-                          key={branch.id}
-                          onClick={() => navigate(`/counterparties/${branch.id}`)}
-                          className="bg-white/[0.05] rounded-xl p-5 cursor-pointer hover:bg-white/[0.1] hover:border-red-500/30 transition-all group border border-white/10"
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-700/30 to-red-900/30 flex items-center justify-center flex-shrink-0">
-                              {getTypeIcon(branch.counterparty_type, true)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <GitBranch className="w-4 h-4 text-white/40" />
-                                <span className="text-sm text-red-400/70">Обособленное подразделение</span>
-                              </div>
-                              <h4 className="text-lg font-semibold text-white mb-1 truncate group-hover:text-red-400 transition-colors">
-                                {branch.name}
-                              </h4>
-                              <p className="text-sm text-white/50 truncate mb-2">{branch.legal_name}</p>
-                              <div className="flex flex-wrap gap-3 text-sm">
-                                <span className="text-white/60">ИНН: <span className="text-white font-mono">{branch.inn}</span></span>
-                                {branch.kpp && <span className="text-white/60">КПП: <span className="text-white font-mono">{branch.kpp}</span></span>}
-                              </div>
-                            </div>
-                            <ChevronRight className="w-5 h-5 text-white/30 group-hover:text-red-400 group-hover:translate-x-1 transition-all flex-shrink-0" />
-                          </div>
-                        </div>
-                      ))}
+
+                    {branch.legal_name && (
+                      <p className="text-white/40 text-sm truncate mb-2">{branch.legal_name}</p>
+                    )}
+
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/35">
+                      <span className="font-mono">ИНН {branch.inn}</span>
+                      {branch.kpp && <span className="font-mono">КПП {branch.kpp}</span>}
+                      {branch.phone && <span>{branch.phone}</span>}
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+
+                  <ChevronRight className="w-4 h-4 text-white/20 flex-shrink-0 mt-1" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+})}
         </div>
       )}
 
-      {/* Pagination */}
+      {/* ── Pagination ───────────────────────────────────────────────────── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-4">
+        <div className="flex items-center justify-center gap-2">
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white text-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-card border border-white/[0.08]
+                       hover:bg-white/[0.07] disabled:opacity-40 disabled:cursor-not-allowed
+                       text-white text-base transition-colors"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-4 h-4" />
             Назад
           </button>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5">
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               const pageNum = Math.max(1, Math.min(page - 2, totalPages - 4)) + i;
               if (pageNum > totalPages) return null;
@@ -362,10 +768,10 @@ export default function CounterpartiesPage() {
                 <button
                   key={pageNum}
                   onClick={() => setPage(pageNum)}
-                  className={`w-12 h-12 rounded-xl text-lg font-medium transition-colors ${
+                  className={`w-10 h-10 rounded-xl text-base font-medium transition-colors ${
                     pageNum === page
-                      ? 'bg-red-800 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
+                      ? 'bg-red-700 text-white'
+                      : 'glass-card text-white/60 border border-white/[0.08] hover:bg-white/[0.08]'
                   }`}
                 >
                   {pageNum}
@@ -373,13 +779,16 @@ export default function CounterpartiesPage() {
               );
             })}
           </div>
+
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white text-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass-card border border-white/[0.08]
+                       hover:bg-white/[0.07] disabled:opacity-40 disabled:cursor-not-allowed
+                       text-white text-base transition-colors"
           >
             Вперёд
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       )}

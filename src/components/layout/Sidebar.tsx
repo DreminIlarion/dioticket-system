@@ -11,7 +11,8 @@ import {
   LogOut,
   X,
   Building,
-  FolderOpen
+  FolderOpen,
+  FileAxis3d
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -55,12 +56,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Главная' },
     { to: '/tickets', icon: FileText, label: 'Заявки' },
-    { to: '/projects', icon: FolderOpen, label: 'Проекты' },
     ...(isCustomer 
       ? [{ to: '/my-company', icon: Building, label: 'Моя компания' }]
       : [{ to: '/counterparties', icon: Building2, label: 'Контрагенты' }]
     ),
+    { to: '/projects', icon: FolderOpen, label: 'Проекты' },
+
+    ...(canInvite ? [{ to: '/products', icon: FileAxis3d, label: 'Продукты' }] : []),
+
     ...(canInvite ? [{ to: '/invitations', icon: Mail, label: 'Приглашения' }] : []),
+    ,
+
+    
   ];
 
   const settingsItems = [
@@ -71,7 +78,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const SidebarContent = () => (
     <div className="bg-[#1c1c1c] flex flex-col h-full">
       {/* Header */}
-      <div className="p-5 border-b border-white/10 flex items-center justify-between">
+      <div className="p-4 border-b border-white/10 flex items-center justify-between">
         <NavLink to="/dashboard" className="flex items-center gap-4 flex-1 min-w-0">
           <img 
             src="http://80.93.62.177:8000/media/images/Logo_bez_fona_bez_teksta.width-80.height-80.png"
@@ -80,8 +87,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           />
           {!isCollapsed && (
             <div className="min-w-0">
-              <h1 className="font-bold text-white text-lg truncate">ДИО-Консалт</h1>
-              <p className="text-xs text-white/50">Система поддержки</p>
+              <h1 className="font-bold text-white text-lg truncate">ДИО-Деск</h1>
+              <p className="text-xs text-white/50">Система заявок</p>
             </div>
           )}
         </NavLink>

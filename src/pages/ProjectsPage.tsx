@@ -30,30 +30,34 @@ export default function ProjectsPage() {
     loadProjects();
   }, [page, projectRole]);
 
-  const loadProjects = async () => {
-    setLoading(true);
-    try {
-      let response;
-      
-      // Для customer используем эндпоинт /my
-      if (isCustomer) {
-        response = await projectsApi.getMyProjects(projectRole, page, 20);
-      } 
-      // Для остальных ролей - все проекты
-      else {
-        response = await projectsApi.getAll(page, 20);
-      }
-      
-      setProjects(response.items || []);
-      setTotalPages(response.total_pages || 1);
-      setTotalItems(response.total_items || 0);
-    } catch (error) {
-      console.error('Failed to load projects:', error);
-      setProjects([]);
-    } finally {
-      setLoading(false);
+const loadProjects = async () => {
+  setLoading(true);
+  try {
+    let response;
+    
+    // Customer: использует getMyProjects
+    if (isCustomer) {
+      response = await projectsApi.getMyProjects(projectRole, page, 20);
+    } 
+    // Customer Admin: использует getAll (или другой API для проектов контрагента)
+    else if (isCustomerAdmin) {
+      response = await projectsApi.getAll(page, 20);
     }
-  };
+    // Для остальных ролей - все проекты
+    else {
+      response = await projectsApi.getAll(page, 20);
+    }
+    
+    setProjects(response.items || []);
+    setTotalPages(response.total_pages || 1);
+    setTotalItems(response.total_items || 0);
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+    setProjects([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const filteredProjects = (projects || []).filter(project =>
     project?.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -120,7 +124,7 @@ export default function ProjectsPage() {
             {isCustomer ? 'Мои проекты' : 'Проекты'}
           </h1>
           <p className="text-white/60 mt-1">
-            {isCustomer ? 'Проекты, в которых вы участвуете' : 'Управление проектами организации'}
+            {isCustomer ? 'Проекты, в которых вы участвуете' : 'Управление проектами контрагента'}
           </p>
         </div>
         
@@ -132,45 +136,8 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="glass-card p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
-              <FolderOpen className="w-6 h-6 text-purple-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{totalItems}</p>
-              <p className="text-white/50 text-sm">Всего проектов</p>
-            </div>
-          </div>
-        </div>
-        <div className="glass-card p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center">
-              <Building2 className="w-6 h-6 text-green-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{getActiveProjectsCount()}</p>
-              <p className="text-white/50 text-sm">Активных проектов</p>
-            </div>
-          </div>
-        </div>
-        <div className="glass-card p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
-              <Users className="w-6 h-6 text-blue-400" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{getTotalParticipants()}</p>
-              <p className="text-white/50 text-sm">Участников</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Search and Role Filter */}
-      <div className="glass-card p-6 mb-8">
+        {/* Search and Role Filter */}
+      <div className=" mb-8">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/40" />
@@ -197,7 +164,7 @@ export default function ProjectsPage() {
               </button>
               
               {showRoleDropdown && (
-                <div className="absolute z-50 mt-2 w-full bg-gray-800 border border-white/20 rounded-xl shadow-2xl overflow-hidden">
+                <div className="absolute z-50 mt-2 w-full bg-[#1c1c1c] border border-white/20 rounded-xl shadow-2xl overflow-hidden">
                   <button
                     onClick={() => {
                       setProjectRole('all');
@@ -241,11 +208,50 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center">
+              <FolderOpen className="w-6 h-6 text-white-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{totalItems}</p>
+              <p className="text-white/50 text-l">Всего проектов</p>
+            </div>
+          </div>
+        </div>
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center">
+              <Building2 className="w-6 h-6 text-green-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{getActiveProjectsCount()}</p>
+              <p className="text-white/50 text-l">Активных проектов</p>
+            </div>
+          </div>
+        </div>
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center">
+              <Users className="w-6 h-6 text-blue-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{getTotalParticipants()}</p>
+              <p className="text-white/50 text-l">Участников</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      
+
       {/* Projects Grid */}
       {filteredProjects.length === 0 ? (
         <div className="glass-card p-12 text-center">
           <FolderOpen className="w-16 h-16 mx-auto mb-4 text-white/20" />
-          <h3 className="text-xl font-semibold text-white mb-2">Нет проектов</h3>
+          <h3 className="text-[18px] font-semibold text-white mb-2">Нет проектов</h3>
           <p className="text-white/50">
             {search ? 'Попробуйте изменить поисковый запрос' : 
              isCustomer ? 'Вы пока не участвуете ни в одном проекте' : 'Создайте первый проект'}
@@ -270,17 +276,17 @@ export default function ProjectsPage() {
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
-                        <FolderOpen className="w-6 h-6 text-purple-400" />
+                      <div className="w-12 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center">
+                        <FolderOpen className="w-6 h-6 text-white-400" />
                       </div>
                       <div>
-                        <h3 className="text-xl font-semibold text-white group-hover:text-purple-400 transition-colors">
+                        <h3 className="text-[18px] font-semibold text-white group-hover:text-white-400 transition-colors">
                           {project.name || 'Без названия'}
                         </h3>
-                        <p className="text-sm text-purple-400 font-mono">{project.key || '—'}</p>
+                        <p className="text-l text-white-400 font-mono">{project.key || '—'}</p>
                       </div>
                     </div>
-                    <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                    <span className={`px-2 py-1 rounded-lg text-l font-medium ${
                       project.status === 'active' 
                         ? 'bg-green-500/20 text-green-400' 
                         : 'bg-gray-500/20 text-gray-400'
@@ -290,7 +296,7 @@ export default function ProjectsPage() {
                   </div>
 
                   {project.description && (
-                    <p className="text-white/60 text-sm mb-4 line-clamp-2">
+                    <p className="text-white/60 text-l mb-4 line-clamp-2">
                       {project.description}
                     </p>
                   )}
@@ -298,7 +304,7 @@ export default function ProjectsPage() {
                   {/* Роль пользователя в проекте */}
                   {userRole && (
                     <div className="mb-3">
-                      <span className={`text-xs px-2 py-1 rounded-full ${
+                      <span className={`text-sm px-2 py-1 rounded-full ${
                         userRole === 'owner' 
                           ? 'bg-amber-500/20 text-amber-400' 
                           : 'bg-blue-500/20 text-blue-400'
@@ -308,7 +314,7 @@ export default function ProjectsPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between text-xs text-white/40 pt-4 border-t border-white/10">
+                  <div className="flex items-center justify-between text-l text-white/40 pt-4 border-t border-white/10">
                     <span>Создан: {formatDate(project.created_at)}</span>
                     <span>Участников: {getParticipantsCount(project)}</span>
                   </div>

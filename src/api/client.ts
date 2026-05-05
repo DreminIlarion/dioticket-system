@@ -22,9 +22,14 @@ import type {
   Project,
   CreateProjectInput,
   UpdateProjectInput,
+  ProductsListResponse,
+  CreateProductPayload,
+  Product,
+  ProductAttributesSchemaResponse,
 } from '@/types';
+import apiClient from './apiClient';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // Создаем экземпляр axios
 const api = axios.create({
@@ -45,24 +50,24 @@ export const tokenStorage = {
   getAccessToken: (): string | null => {
     return localStorage.getItem(TOKEN_KEYS.ACCESS);
   },
-  
+
   getRefreshToken: (): string | null => {
     return localStorage.getItem(TOKEN_KEYS.REFRESH);
   },
-  
+
   setTokens: (accessToken: string, refreshToken: string, expiresAt: number) => {
     localStorage.setItem(TOKEN_KEYS.ACCESS, accessToken);
     localStorage.setItem(TOKEN_KEYS.REFRESH, refreshToken);
     localStorage.setItem(TOKEN_KEYS.EXPIRES_AT, expiresAt.toString());
   },
-  
+
   clearTokens: () => {
     localStorage.removeItem(TOKEN_KEYS.ACCESS);
     localStorage.removeItem(TOKEN_KEYS.REFRESH);
     localStorage.removeItem(TOKEN_KEYS.EXPIRES_AT);
     localStorage.removeItem('user');
   },
-  
+
   isTokenExpired: (): boolean => {
     const expiresAt = localStorage.getItem(TOKEN_KEYS.EXPIRES_AT);
     if (!expiresAt) return true;
@@ -108,7 +113,7 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
-    
+
     // Если ошибка не 401 или запрос уже повторялся - просто отклоняем
     if (error.response?.status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
@@ -125,7 +130,7 @@ api.interceptors.response.use(
     isRefreshing = true;
 
     const refreshToken = tokenStorage.getRefreshToken();
-    
+
     if (!refreshToken) {
       // Нет refresh токена - выходим
       tokenStorage.clearTokens();
@@ -138,23 +143,23 @@ api.interceptors.response.use(
       const response = await axios.post(`${API_URL}/api/v1/auth/refresh`, {
         refresh_token: refreshToken,
       });
-      
+
       const { access_token, refresh_token, expires_at } = response.data;
-      
+
       // Сохраняем новые токены
       tokenStorage.setTokens(access_token, refresh_token, expires_at);
-      
+
       // Обновляем заголовок для оригинального запроса
       if (originalRequest.headers) {
         originalRequest.headers.Authorization = `Bearer ${access_token}`;
       }
-      
+
       // Обрабатываем очередь ожидающих запросов
       processQueue(null, access_token);
-      
+
       // Повторяем оригинальный запрос
       return api(originalRequest);
-      
+
     } catch (refreshError) {
       // Refresh токен тоже протух или невалиден - очищаем всё и редирект на логин
       console.error('Refresh token failed:', refreshError);
@@ -193,14 +198,14 @@ export const authApi = {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
-    
+
     // Автоматически сохраняем токены при логине
     tokenStorage.setTokens(
       response.data.access_token,
       response.data.refresh_token,
       response.data.expires_at
     );
-    
+
     return response.data;
   },
 
@@ -220,7 +225,7 @@ export const authApi = {
   uploadAvatar: async (file: File): Promise<UserProfile> => {
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const response = await api.post<UserProfile>('/api/v1/users/me/avatar', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
@@ -283,7 +288,7 @@ export const counterpartiesApi = {
 
   // Создать/обновить контактное лицо
   updateContactPerson: async (id: string, data: ContactPersonInput): Promise<ContactPerson> => {
-    const response = await api.post<ContactPerson>(`/api/v1/counterparties/${id}/contact-person`, data);
+    const response = await api.post<ContactPerson>(`/api/v1/counterparties/${id}/contact-persons`, data);
     return response.data;
   },
 
@@ -300,6 +305,21 @@ export const counterpartiesApi = {
     });
     return response.data.items.filter(c => c.parent_id === id);
   },
+  // Получить привязанные продукты контрагента
+  getProducts: async (counterpartyId: string, page = 1, size = 10) => {
+  const res = await api.get(`/api/v1/counterparties/${counterpartyId}/products`, {
+    params: { page, size },
+  });
+  return res.data;
+},
+
+linkProduct: async (
+  counterpartyId: string,
+  data: { product_id: string; environment: string; is_primary: boolean }
+) => {
+  const res = await api.post(`/api/v1/counterparties/${counterpartyId}/products`, data);
+  return res.data;
+},
 };
 
 // ==== Invitations API ====
@@ -343,17 +363,17 @@ interface PredictResponse {
 
 // ==================== PROJECTS API ====================
 export interface AddMemberRequest {
-      user_id: string;
-      project_role: 'owner' | 'manager' | 'member' | 'viewer' | 'customer' | 'customer_admin';
-    }
+  user_id: string;
+  project_role: 'owner' | 'manager' | 'member' | 'viewer' | 'customer' | 'customer_admin';
+}
 
-    export interface AddMembersRequest {
-      members: AddMemberRequest[];
-    }
+export interface AddMembersRequest {
+  members: AddMemberRequest[];
+}
 export const projectsApi = {
   // Получить список проектов (с пагинацией)
   getAll: async (
-    page: number = 1, 
+    page: number = 1,
     size: number = 10,
     status?: ProjectStatus
   ): Promise<PaginatedResponse<Project>> => {
@@ -399,35 +419,36 @@ export const projectsApi = {
     return response.data;
   },
 
-    
 
-    // Добавить одного участника
-    addMember: async (projectId: string, data: AddMemberRequest): Promise<Project> => {
-      const response = await api.post<Project>(`/api/v1/projects/${projectId}/memberships`, {
-        members: [data]
-      });
-      return response.data;
-    },
 
-    // Добавить нескольких участников
-    addMembers: async (projectId: string, members: AddMemberRequest[]): Promise<Project> => {
-      const response = await api.post<Project>(`/api/v1/projects/${projectId}/memberships`, {
-        members
-      });
-      return response.data;
-    },
+  // Добавить одного участника
+  addMember: async (projectId: string, data: AddMemberRequest): Promise<Project> => {
+    const response = await api.post<Project>(`/api/v1/projects/${projectId}/memberships`, {
+      members: [data]
+    });
+    return response.data;
+  },
 
-    // Получить мои проекты (для customer)
-getMyProjects: async (
-  role: 'all' | 'owner' | 'member' = 'all',
-  page: number = 1,
-  size: number = 10
-): Promise<PaginatedResponse<Project>> => {
-  const response = await api.get<PaginatedResponse<Project>>('/api/v1/projects/my', {
-    params: { role, page, size },
-  });
-  return response.data;
-},
+  // Добавить нескольких участников
+  addMembers: async (projectId: string, members: AddMemberRequest[]): Promise<Project> => {
+    const response = await api.post<Project>(`/api/v1/projects/${projectId}/memberships`, {
+      members
+    });
+    return response.data;
+  },
+
+  // Получить мои проекты (для customer)
+  getMyProjects: async (
+    role: 'all' | 'owner' | 'member' = 'all',
+    page: number = 1,
+    size: number = 10
+  ): Promise<PaginatedResponse<Project>> => {
+    const response = await api.get<PaginatedResponse<Project>>('/api/v1/projects/my', {
+      params: { role, page, size },
+    });
+    return response.data;
+  },
+
 
 
 };
@@ -450,7 +471,7 @@ export const ticketsApi = {
 
   // Получить мои заявки (основной метод)
   getMy: async (
-    page: number = 1, 
+    page: number = 1,
     size: number = 10,
     status?: TicketStatus,
     priority?: TicketPriority
@@ -463,7 +484,7 @@ export const ticketsApi = {
 
   // Получить все заявки (для support и выше)
   getAll: async (
-    page: number = 1, 
+    page: number = 1,
     size: number = 10,
     status?: TicketStatus,
     priority?: TicketPriority
@@ -503,7 +524,7 @@ export const ticketsApi = {
   ): Promise<PaginatedResponse<Comment>> => {
     const response = await api.get<PaginatedResponse<Comment>>(
       `/api/v1/tickets/${ticketId}/comments`,
-      { 
+      {
         params: {
           include_internal: params?.include_internal || false,
           page: params?.page || 1,
@@ -516,13 +537,13 @@ export const ticketsApi = {
 
   // Добавить комментарий - исправлен (возвращает комментарий, а не тикет)
   addComment: async (
-    ticketId: string, 
-    text: string, 
+    ticketId: string,
+    text: string,
     type: 'public' | 'internal' | 'note' = 'public'
   ): Promise<Comment> => {
-    const response = await api.post<Comment>(`/api/v1/tickets/${ticketId}/comments`, { 
-      text, 
-      type 
+    const response = await api.post<Comment>(`/api/v1/tickets/${ticketId}/comments`, {
+      text,
+      type
     });
     return response.data;
   },
@@ -540,94 +561,159 @@ export const ticketsApi = {
     return response.data;
   },
 
-  // Удалить комментарий (НОВЫЙ МЕТОД)
+
+
+  getAllWithFilters: async (
+    page: number = 1,
+    size: number = 10,
+    filters?: {
+      status?: TicketStatus;
+      priority?: TicketPriority;
+      counterparty_id?: string;
+      project_id?: string;
+      created_by?: string;
+      reporter_id?: string;
+      assigned_to?: string;
+      search?: string;
+      tags?: string[];
+    }
+  ): Promise<PaginatedResponse<TicketListItem>> => {
+    const params: any = { page, size };
+
+    if (filters?.status) params.status = filters.status;
+    if (filters?.priority) params.priority = filters.priority;
+    if (filters?.counterparty_id) params.counterparty_id = filters.counterparty_id;
+    if (filters?.project_id) params.project_id = filters.project_id;
+    if (filters?.created_by) params.created_by = filters.created_by;
+    if (filters?.reporter_id) params.reporter_id = filters.reporter_id;
+    if (filters?.assigned_to) params.assigned_to = filters.assigned_to;
+    if (filters?.search) params.search = filters.search;
+    if (filters?.tags && filters.tags.length > 0) params.tags = filters.tags.join(',');
+
+    const response = await api.get<PaginatedResponse<TicketListItem>>('/api/v1/tickets', { params });
+    return response.data;
+  },
+
+  // Найти тикет по номеру (если бэкенд поддерживает)
+  getByNumber: async (number: string): Promise<Ticket | null> => {
+    try {
+      // Пробуем через фильтр search
+      const response = await api.get<PaginatedResponse<TicketListItem>>('/api/v1/tickets', {
+        params: { search: number, page: 1, size: 1 }
+      });
+
+      if (response.data.items.length > 0) {
+        const found = response.data.items[0];
+        if (found.number === number) {
+          return await ticketsApi.getById(found.id);
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Failed to find ticket by number:', error);
+      return null;
+    }
+  },
+
+
+  // Добавить метод для получения сотрудников контрагента (для фильтра по инициатору)
+  getCompanyUsers: async (counterpartyId: string): Promise<CounterpartyCustomer[]> => {
+    const response = await api.get<PaginatedResponse<CounterpartyCustomer>>(
+      `/api/v1/counterparties/${counterpartyId}/customers`,
+      { params: { page: 1, size: 100 } }
+    );
+    return response.data.items;
+  },
+  // Назначить исполнителя
+  assignTicket: async (ticketId: string, assigneeId: string): Promise<Ticket> => {
+    const response = await api.post<Ticket>(`/api/v1/tickets/${ticketId}/assign`, {
+      assignee_id: assigneeId
+    });
+    return response.data;
+  },
+
+  // Изменить статус тикета
+  updateTicketStatus: async (ticketId: string, status: TicketStatus): Promise<Ticket> => {
+    const response = await api.patch<Ticket>(`/api/v1/tickets/${ticketId}/status`, {
+      status
+    });
+    return response.data;
+  },
+
+  // Получить ответы на комментарий
+  getCommentReplies: async (
+    commentId: string,
+    params?: {
+      include_internal?: boolean;
+      page?: number;
+      size?: number;
+    }
+  ): Promise<PaginatedResponse<Comment>> => {
+    const response = await api.get<PaginatedResponse<Comment>>(
+      `/api/v1/tickets/comments/${commentId}/replies`,
+      {
+        params: {
+          include_internal: params?.include_internal || false,
+          page: params?.page || 1,
+          size: params?.size || 10
+        }
+      }
+    );
+    return response.data;
+  },
+
+  // Ответить на комментарий
+  replyToComment: async (
+    ticketId: string,
+    commentId: string,
+    text: string,
+    type: 'public' | 'internal' | 'note' = 'public'
+  ): Promise<Comment> => {
+    const response = await api.post<Comment>(
+      `/api/v1/tickets/${ticketId}/comments/${commentId}/replies`,
+      { text, type }
+    );
+    return response.data;
+  },
+
+  // Редактировать комментарий (обновлённый путь)
+  editComment: async (
+    ticketId: string,
+    commentId: string,
+    text: string
+  ): Promise<Comment> => {
+    const response = await api.patch<Comment>(
+      `/api/v1/tickets/${ticketId}/comments/${commentId}`,
+      { text }
+    );
+    return response.data;
+  },
+
+  // Удалить комментарий (обновлённый путь)
   deleteComment: async (
     ticketId: string,
     commentId: string
   ): Promise<void> => {
-    await api.delete(`/api/v1/tickets/tickets/${ticketId}/comments/${commentId}`);
+    await api.delete(`/api/v1/tickets/${ticketId}/comments/${commentId}`);
   },
-  
-// В ticketsApi добавьте/обновите метод:
+  // Получить реакции комментария
+  getCommentReactions: async (commentId: string): Promise<{ reaction_counts: Record<string, number>; user_reactions: string[] }> => {
+    const response = await api.get(`/api/v1/tickets/comments/${commentId}/reactions`);
+    return response.data;
+  },
 
-getAllWithFilters: async (
-  page: number = 1,
-  size: number = 10,
-  filters?: {
-    status?: TicketStatus;
-    priority?: TicketPriority;
-    counterparty_id?: string;
-    project_id?: string;
-    created_by?: string;
-    reporter_id?: string;
-    assigned_to?: string;
-    search?: string;
-    tags?: string[];
-  }
-): Promise<PaginatedResponse<TicketListItem>> => {
-  const params: any = { page, size };
-  
-  if (filters?.status) params.status = filters.status;
-  if (filters?.priority) params.priority = filters.priority;
-  if (filters?.counterparty_id) params.counterparty_id = filters.counterparty_id;
-  if (filters?.project_id) params.project_id = filters.project_id;
-  if (filters?.created_by) params.created_by = filters.created_by;
-  if (filters?.reporter_id) params.reporter_id = filters.reporter_id;
-  if (filters?.assigned_to) params.assigned_to = filters.assigned_to;
-  if (filters?.search) params.search = filters.search;
-  if (filters?.tags && filters.tags.length > 0) params.tags = filters.tags.join(',');
-  
-  const response = await api.get<PaginatedResponse<TicketListItem>>('/api/v1/tickets', { params });
-  return response.data;
-},
-
-// Найти тикет по номеру (если бэкенд поддерживает)
-getByNumber: async (number: string): Promise<Ticket | null> => {
-  try {
-    // Пробуем через фильтр search
-    const response = await api.get<PaginatedResponse<TicketListItem>>('/api/v1/tickets', {
-      params: { search: number, page: 1, size: 1 }
+  // Поставить/убрать реакцию
+  toggleReaction: async (commentId: string, reactionType: string): Promise<void> => {
+    await api.post(`/api/v1/tickets/comments/${commentId}/reactions`, {
+      reaction_type: reactionType
     });
-    
-    if (response.data.items.length > 0) {
-      const found = response.data.items[0];
-      if (found.number === number) {
-        return await ticketsApi.getById(found.id);
-      }
-    }
-    return null;
-  } catch (error) {
-    console.error('Failed to find ticket by number:', error);
-    return null;
-  }
-},
+  },
 
-
-// Добавить метод для получения сотрудников контрагента (для фильтра по инициатору)
-getCompanyUsers: async (counterpartyId: string): Promise<CounterpartyCustomer[]> => {
-  const response = await api.get<PaginatedResponse<CounterpartyCustomer>>(
-    `/api/v1/counterparties/${counterpartyId}/customers`,
-    { params: { page: 1, size: 100 } }
-  );
-  return response.data.items;
-},
-// Назначить исполнителя
-assignTicket: async (ticketId: string, assigneeId: string): Promise<Ticket> => {
-  const response = await api.post<Ticket>(`/api/v1/tickets/${ticketId}/assign`, {
-    assignee_id: assigneeId
-  });
-  return response.data;
-},
-
-// Изменить статус тикета
-updateTicketStatus: async (ticketId: string, status: TicketStatus): Promise<Ticket> => {
-  const response = await api.patch<Ticket>(`/api/v1/tickets/${ticketId}/status`, {
-    status
-  });
-  return response.data;
-},
+archiveTicket: (ticketId: string) =>
+  api.delete(`/api/v1/tickets/${ticketId}`).then(r => r.data),
 
 };
+
 
 // ==== Users API ====
 export const usersApi = {
@@ -643,12 +729,64 @@ export const usersApi = {
     );
     return response.data;
   },
-   getSupports: async (page: number = 1, size: number = 100): Promise<PaginatedResponse<SimpleUser>> => {
+  getSupports: async (page: number = 1, size: number = 100): Promise<PaginatedResponse<SimpleUser>> => {
     const response = await api.get<PaginatedResponse<SimpleUser>>('/api/v1/users/supports', {
       params: { page, size }
     });
     return response.data;
   },
+  // В usersApi добавьте:
+  getAllUsers: async (page: number = 1, size: number = 100): Promise<PaginatedResponse<SimpleUser>> => {
+    const response = await api.get<PaginatedResponse<SimpleUser>>('/api/v1/users', {
+      params: { page, size }
+    });
+    return response.data;
+  },
+
 };
 
 export default api;
+
+// API для Коррекции текста
+export const proofreadingApi = {
+  spellCheck: async (text: string) => {
+    const response = await api.post('/api/v1/proofreading/spell-check', { text });
+    return response.data;
+  }
+};
+
+
+
+//API Product
+export const productsApi = {
+  getProducts: async (params: {
+    page?: number;
+    size?: number;
+    category?: string;
+    status?: string;
+    query?: string;
+  }) => {
+    const response = await api.get('/api/v1/products', { params });
+    return response.data;
+  },
+
+  createProduct: async (payload: {
+    name: string;
+    vendor: string;
+    category: string;
+    description?: string;
+    version?: string;
+    status: string;
+    attributes: Record<string, any>;
+  }) => {
+    const response = await api.post('/api/v1/products', payload);
+    return response.data;
+  },
+
+  getCategorySchema: async (category: string) => {
+    const response = await api.get(
+      `/api/v1/products/categories/${encodeURIComponent(category)}/attributes-schema`
+    );
+    return response.data;
+  },
+};

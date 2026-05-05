@@ -357,7 +357,7 @@ export default function NewProjectPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto pb-12">
+    <div className="max-w-7xl mx-auto pb-12">
       {/* Header */}
       <div className="flex items-center gap-6 mb-8">
         <button
@@ -368,7 +368,7 @@ export default function NewProjectPage() {
         </button>
         <div>
           <h1 className="text-4xl font-bold text-white">Создание проекта</h1>
-          <p className="text-white/60 mt-1">Новый проект для организации</p>
+          <p className="text-white/60 mt-1">Новый проект для контрагента</p>
         </div>
       </div>
 
@@ -390,17 +390,17 @@ export default function NewProjectPage() {
                   setShowDropdown(true);
                 }}
                 onFocus={() => setShowDropdown(true)}
-                placeholder="Поиск организации..."
+                placeholder="Поиск контрагента..."
                 className="input-field pl-12 py-4 text-lg w-full"
               />
             </div>
             
             {showDropdown && (
-              <div className="absolute z-50 mt-2 w-full bg-gray-800 border border-white/20 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
+              <div className="absolute z-50 mt-2 w-full bg-[#1c1c1c] border border-white/20 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
                 {loading ? (
                   <div className="p-8 text-center">
                     <Loader2 className="w-8 h-8 animate-spin mx-auto text-white/50" />
-                    <p className="text-white/50 mt-3">Загрузка организаций...</p>
+                    <p className="text-white/50 mt-3">Загрузка контрагнета...</p>
                   </div>
                 ) : filteredCounterparties.length === 0 ? (
                   <div className="p-8 text-center">
@@ -433,7 +433,7 @@ export default function NewProjectPage() {
           {counterpartyId && (
             <div className="mt-4 p-4 rounded-xl bg-green-500/10 border border-green-500/30 flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-green-400" />
-              <span className="text-white">Организация выбрана</span>
+              <span className="text-white">Контрагнет выбран</span>
             </div>
           )}
         </div>
@@ -610,7 +610,7 @@ export default function NewProjectPage() {
             {/* Выпадающий список для смены владельца */}
             {showOwnerDropdown && (
               <div className="relative" ref={ownerDropdownRef}>
-                <div className="absolute z-50 mt-0 w-full bg-gray-800 border border-white/20 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
+                <div className="absolute z-50 mt-0 w-full bg-[#1c1c1c] border border-white/20 rounded-xl shadow-2xl max-h-80 overflow-y-auto">
                   {loadingUsers ? (
                     <div className="p-8 text-center">
                       <Loader2 className="w-8 h-8 animate-spin mx-auto text-white/50" />

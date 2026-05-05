@@ -65,7 +65,7 @@ export default function InviteAcceptPage() {
         <div className="w-full max-w-md">
           <div className="bg-neutral-900/80 backdrop-blur-sm border border-neutral-800 rounded-2xl p-8 text-center">
             <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-white mb-2">Ссылка недействительна</h2>
+            <h2 className="text-[16px] font-semibold text-white mb-2">Ссылка недействительна</h2>
             <p className="text-neutral-400 mb-6">
               Токен приглашения не найден. Убедитесь, что вы перешли по правильной ссылке из письма.
             </p>
@@ -89,7 +89,7 @@ export default function InviteAcceptPage() {
             <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-8 h-8 text-green-500" />
             </div>
-            <h2 className="text-xl font-semibold text-white mb-2">Регистрация успешна!</h2>
+            <h2 className="text-[16px] font-semibold text-white mb-2">Регистрация успешна!</h2>
             <p className="text-neutral-400 mb-6">
               Ваш аккаунт создан. Сейчас вы будете перенаправлены на страницу входа...
             </p>
@@ -120,7 +120,7 @@ export default function InviteAcceptPage() {
 
         {/* Форма */}
         <div className="bg-neutral-900/80 backdrop-blur-sm border border-neutral-800 rounded-2xl p-8">
-          <h2 className="text-xl font-semibold text-white mb-2">Создание аккаунта</h2>
+          <h2 className="text-[16px] font-semibold text-white mb-2">Создание аккаунта</h2>
           <p className="text-neutral-500 mb-6">Заполните данные для завершения регистрации</p>
 
           {error && (

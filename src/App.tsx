@@ -1,46 +1,136 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import DashboardPage from './pages/DashboardPage';
-import TicketsPage from './pages/TicketsPage';
-import NewTicketPage from './pages/NewTicketPage';
-import TicketDetailPage from './pages/TicketDetailPage';
-import CounterpartiesPage from './pages/CounterpartiesPage';
-import NewCounterpartyPage from './pages/NewCounterpartyPage';
-import CounterpartyDetailPage from './pages/CounterpartyDetailPage';
-import MyCompanyPage from './pages/MyCompanyPage';
-import InvitationsPage from './pages/InvitationsPage';
-import NotificationsPage from './pages/NotificationsPage';
-import ProfilePage from './pages/ProfilePage';
 import { Toaster } from './components/ui/toaster';
-import ProjectsPage from './pages/ProjectsPage';
-import NewProjectPage from './pages/NewProjectPage';
-import ProjectDetailPage from './pages/ProjectDetailPage';
-  
+import { Loader2 } from 'lucide-react';
 
+// Компонент загрузки
+const PageLoader = () => (
+  <div className="min-h-screen flex items-center justify-center">
+    <Loader2 className="w-12 h-12 text-red-500 animate-spin" />
+  </div>
+);
+
+// Обёртка для ленивых компонентов
+const LazyRoute = ({ children }: { children: React.ReactNode }) => (
+  <Suspense fallback={<PageLoader />}>{children}</Suspense>
+);
+
+// Ленивая загрузка страниц
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const TicketsPage = lazy(() => import('./pages/TicketsPage'));
+const NewTicketPage = lazy(() => import('./pages/NewTicketPage'));
+const TicketDetailPage = lazy(() => import('./pages/TicketDetailPage'));
+const CounterpartiesPage = lazy(() => import('./pages/CounterpartiesPage'));
+const NewCounterpartyPage = lazy(() => import('./pages/NewCounterpartyPage'));
+const CounterpartyDetailPage = lazy(() => import('./pages/CounterpartyDetailPage'));
+const MyCompanyPage = lazy(() => import('./pages/MyCompanyPage'));
+const InvitationsPage = lazy(() => import('./pages/InvitationsPage'));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const NewProjectPage = lazy(() => import('./pages/NewProjectPage'));
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
+const ProductsTab = lazy(() => import('./pages/ProductsTab'));
+const CreateProductPage = lazy(() => import('./pages/CreateProductPage'));
 export default function App() {
   return (
     <>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/auth/invite/accept" element={<RegisterPage />} />
+        <Route path="/login" element={
+          <LazyRoute>
+            <LoginPage />
+          </LazyRoute>
+        } />
+        <Route path="/auth/invite/accept" element={
+          <LazyRoute>
+            <RegisterPage />
+          </LazyRoute>
+        } />
         
         <Route element={<Layout />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/tickets" element={<TicketsPage />} />
-          <Route path="/tickets/new" element={<NewTicketPage />} />
-          <Route path="/tickets/:ticketNumber" element={<TicketDetailPage />} />
-          <Route path="/counterparties" element={<CounterpartiesPage />} />
-          <Route path="/counterparties/new" element={<NewCounterpartyPage />} />
-          <Route path="/counterparties/:id" element={<CounterpartyDetailPage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/projects/new" element={<NewProjectPage />} />
-          <Route path="/projects/:id" element={<ProjectDetailPage />} />
-          <Route path="/my-company" element={<MyCompanyPage />} />
-          <Route path="/invitations" element={<InvitationsPage />} />
-          <Route path="/notifications" element={<NotificationsPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/dashboard" element={
+            <LazyRoute>
+              <DashboardPage />
+            </LazyRoute>
+          } />
+          <Route path="/tickets" element={
+            <LazyRoute>
+              <TicketsPage />
+            </LazyRoute>
+          } />
+          <Route path="/tickets/new" element={
+            <LazyRoute>
+              <NewTicketPage />
+            </LazyRoute>
+          } />
+          <Route path="/tickets/:ticketNumber" element={
+            <LazyRoute>
+              <TicketDetailPage />
+            </LazyRoute>
+          } />
+          <Route path="/counterparties" element={
+            <LazyRoute>
+              <CounterpartiesPage />
+            </LazyRoute>
+          } />
+          <Route path="/counterparties/new" element={
+            <LazyRoute>
+              <NewCounterpartyPage />
+            </LazyRoute>
+          } />
+          <Route path="/counterparties/:id" element={
+            <LazyRoute>
+              <CounterpartyDetailPage />
+            </LazyRoute>
+          } />
+          <Route path="/projects" element={
+            <LazyRoute>
+              <ProjectsPage />
+            </LazyRoute>
+          } />
+          <Route path="/projects/new" element={
+            <LazyRoute>
+              <NewProjectPage />
+            </LazyRoute>
+          } />
+          <Route path="/projects/:id" element={
+            <LazyRoute>
+              <ProjectDetailPage />
+            </LazyRoute>
+          } />
+          <Route path="/my-company" element={
+            <LazyRoute>
+              <MyCompanyPage />
+            </LazyRoute>
+          } />
+          <Route path="/invitations" element={
+            <LazyRoute>
+              <InvitationsPage />
+            </LazyRoute>
+          } />
+          <Route path="/notifications" element={
+            <LazyRoute>
+              <NotificationsPage />
+            </LazyRoute>
+          } />
+           <Route path="/products" element={
+            <LazyRoute>
+              <ProductsTab />
+            </LazyRoute>
+          } />
+           <Route path="/products/new" element={
+            <LazyRoute>
+              <CreateProductPage />
+            </LazyRoute>
+          } />
+          <Route path="/profile" element={
+            <LazyRoute>
+              <ProfilePage />
+            </LazyRoute>
+          } />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>

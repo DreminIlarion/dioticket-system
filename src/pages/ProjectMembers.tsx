@@ -139,7 +139,7 @@ export default function ProjectMembers({ project, onUpdate }: ProjectMembersProp
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-white/60" />
-          <h3 className="text-xl font-semibold text-white">Участники проекта</h3>
+          <h3 className="text-[16px] font-semibold text-white">Участники проекта</h3>
           <span className="px-2 py-0.5 rounded-full bg-white/10 text-white/50 text-sm">
             {project.memberships?.length || 0}
           </span>
